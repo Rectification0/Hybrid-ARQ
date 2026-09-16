@@ -32,6 +32,7 @@ import config
 from eventlog import EventLog
 from protocol import packet as pk
 from protocol.packet import Packet, PacketType
+from network.simulator import Impairment
 from network.udp import open_udp_socket
 from protocol.strategy import ReceiverTransferState, make_receiver_strategy
 
@@ -105,7 +106,8 @@ class Receiver:
     def __init__(self, *, output: Path, host: str = config.HOST,
                  port: int = config.PORT, run_id: str | None = None,
                  log_dir=None, idle_timeout: float | None = None,
-                 linger: float | None = None):
+                 linger: float | None = None,
+                 impairment: Impairment | None = None):
         self.output = Path(output)
         self.host = host
         self.port = port
@@ -115,12 +117,14 @@ class Receiver:
                              if idle_timeout is None else idle_timeout)
         self.linger = config.RECEIVER_LINGER_S if linger is None else linger
 
-        self.sock = open_udp_socket()
+        self.impairment = impairment or Impairment()
+        self.sock = self.impairment.wrap(open_udp_socket(), self._on_impairment)
         self.state = "LISTENING"
         self.log: EventLog | None = None
         self.writer: OutputWriter | None = None
         self.start_info: pk.StartPayload | None = None
         self.mode = "saw"
+        self.window_size = 1
         self.duplicates = 0
         self.integrity_success = False
 
@@ -169,6 +173,19 @@ class Receiver:
         if self.log is not None:
             self.log.emit(event, mode=self.mode, **fields)
 
+    def _on_impairment(self, kind: str, direction: str, raw, **detail) -> None:
+        """Log a simulated drop, distinctly from real corruption (IN-04, T4.3)."""
+        sequence = None
+        reason = detail.get("reason")
+        if raw is not None:
+            try:
+                decoded = pk.decode(raw)
+                sequence = decoded.seq
+                reason = f"{direction};{decoded.type.name}"
+            except pk.PacketError:
+                reason = f"{direction};undecodable"
+        self._log(kind, sequence=sequence, reason=reason)
+
     # -- phases ------------------------------------------------------------
 
     def _await_start(self):
@@ -185,6 +202,7 @@ class Receiver:
             self.run_id = info.run_id or self.run_id
             self.log = EventLog(self.run_id, "receiver", log_dir=self.log_dir)
             self.mode = info.mode
+            self.window_size = max(1, pkt.window)
             self._log("START", window_size=pkt.window,
                       reason=f"{info.filename} {info.filesize}B")
             return info, address
@@ -225,7 +243,7 @@ class Receiver:
         transfer = ReceiverTransferState()
         # The sender's START names the mode, so both sides run the same ACK
         # semantics without the receiver ever deciding anything (design.md §1).
-        strategy = make_receiver_strategy(self.mode, transfer)
+        strategy = make_receiver_strategy(self.mode, transfer, self.window_size)
 
         while True:
             pkt, source = self._receive(self.idle_timeout)
@@ -325,6 +343,7 @@ class Receiver:
                     "output": str(self.output),
                     "expected_sha256": self.start_info.sha256 if self.start_info else None,
                     "final_state": self.state,
+                    "impairment": self.impairment.as_dict(),
                 })
                 self.log.close()
             self.sock.close()
@@ -355,14 +374,23 @@ def build_parser() -> argparse.ArgumentParser:
                         help="normally taken from the sender's START")
     parser.add_argument("--log-dir", default=None, type=Path)
     parser.add_argument("--idle-timeout", type=float, default=None)
+    impair = parser.add_argument_group("impairment")
+    impair.add_argument("--rtt", type=float, default=config.RTT_MS,
+                        help="emulated round-trip time in ms; half is applied here")
+    impair.add_argument("--jitter", type=float, default=config.JITTER_MS)
+    impair.add_argument("--seed", type=int, default=config.RANDOM_SEED)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # Half the RTT on each direction, so a round trip totals the target
+    # (design.md 8). The receiver carries the ACK half.
     receiver = Receiver(output=args.output, host=args.host, port=args.port,
                         run_id=args.run_id or f"recv_{uuid.uuid4().hex[:6]}",
-                        log_dir=args.log_dir, idle_timeout=args.idle_timeout)
+                        log_dir=args.log_dir, idle_timeout=args.idle_timeout,
+                        impairment=Impairment(delay_ms=args.rtt / 2.0,
+                                              jitter_ms=args.jitter, seed=args.seed))
     port = receiver.bind()
     print(f"listening on {args.host}:{port}, writing {args.output}")
 

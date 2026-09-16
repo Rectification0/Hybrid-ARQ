@@ -32,6 +32,7 @@ import config
 from eventlog import EventLog
 from protocol import packet as pk
 from protocol.packet import Packet, PacketType
+from network.simulator import Impairment
 from network.udp import open_udp_socket
 from protocol.strategy import SenderTransferState, make_sender_strategy
 
@@ -41,7 +42,7 @@ from protocol.strategy import SenderTransferState, make_sender_strategy
 MODE_TASKS = {
     "saw": None,
     "gbn": None,
-    "sr": "T4.5",
+    "sr": None,
     "hybrid": "T5.4",
     "fixed-hybrid": "T5.6",
 }
@@ -77,7 +78,8 @@ class Sender:
 
     def __init__(self, *, path: Path, host: str, port: int, mode: str,
                  window: int, run_id: str, log_dir=None,
-                 rto: float | None = None, sock: socket.socket | None = None):
+                 rto: float | None = None, sock: socket.socket | None = None,
+                 impairment: Impairment | None = None):
         self.path = Path(path)
         self.host = host
         self.port = port
@@ -88,7 +90,8 @@ class Sender:
 
         self.log = EventLog(run_id, "sender", log_dir=log_dir)
         self._owns_socket = sock is None
-        self.sock = sock or open_udp_socket()
+        self.impairment = impairment or Impairment()
+        self.sock = self.impairment.wrap(sock or open_udp_socket(), self._on_impairment)
 
         self.state = "IDLE"
         self.segments: list[bytes] = []
@@ -147,6 +150,27 @@ class Sender:
             except pk.PacketError as exc:
                 self.log.emit("MALFORMED", mode=self.mode,
                               reason=f"{type(exc).__name__}: {exc}")
+
+    def _on_impairment(self, kind: str, direction: str, raw, **detail) -> None:
+        """Log what the simulator did to a packet.
+
+        Decoding happens here rather than in the simulator so the network layer
+        stays ignorant of the packet format. A DROP is a *simulated* loss and is
+        deliberately a different event from CHECKSUM_FAIL, which is real
+        corruption — conflating them would leave the analysis unable to tell an
+        injected condition from a protocol defect (IN-04, T4.3).
+        """
+        sequence = None
+        reason = detail.get("reason")
+        if raw is not None:
+            try:
+                decoded = pk.decode(raw)
+                sequence = decoded.seq
+                reason = f"{direction};{decoded.type.name}"
+            except pk.PacketError:
+                reason = f"{direction};undecodable"
+        self.log.emit(kind, sequence=sequence, mode=self.mode,
+                      window_size=self.window, reason=reason)
 
     def _transition(self, new_state: str) -> None:
         self.state = new_state
@@ -350,6 +374,8 @@ class Sender:
                     "total_segments": len(self.segments),
                 },
                 "final_state": self.state,
+                "impairment": self.impairment.as_dict(),
+                "rto_s": self.rto,
             })
             self.log.close()
             if self._owns_socket:
@@ -400,7 +426,35 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-id", default=None, help="defaults to a generated id")
     parser.add_argument("--log-dir", default=None, type=Path)
     parser.add_argument("--rto", type=float, default=None, help="override RTO seconds")
+
+    impair = parser.add_argument_group(
+        "impairment", "controlled loss and delay (network/simulator.py)")
+    impair.add_argument("--loss", type=float, default=config.LOSS_RATE,
+                        help="DATA loss probability on the send path")
+    impair.add_argument("--ack-loss", type=float, default=config.ACK_LOSS_RATE,
+                        help="ACK loss probability on the receive path")
+    impair.add_argument("--rtt", type=float, default=config.RTT_MS,
+                        help="emulated round-trip time in ms; half is applied here")
+    impair.add_argument("--jitter", type=float, default=config.JITTER_MS,
+                        help="bounded delay jitter in ms")
+    impair.add_argument("--seed", type=int, default=config.RANDOM_SEED,
+                        help="impairment seed; the same seed replays the same drops")
+    impair.add_argument("--loss-schedule", default=None,
+                        help="dynamic loss as t:rate,t:rate (seconds:probability)")
     return parser
+
+
+def parse_loss_schedule(text):
+    """Parse a dynamic-loss step function, e.g. 5:0.1,10:0.0 (specs.md 17.3)."""
+    if not text:
+        return ()
+    steps = []
+    for chunk in text.split(","):
+        moment, separator, rate = chunk.partition(":")
+        if not separator:
+            raise ValueError(f"loss schedule step {chunk!r} is not t:rate")
+        steps.append((float(moment), float(rate)))
+    return tuple(sorted(steps))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -416,9 +470,16 @@ def main(argv: list[str] | None = None) -> int:
 
     run_id = (args.run_id or
               f"{args.mode}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}")
+    impairment = Impairment(
+        loss_rate=args.loss, recv_loss_rate=args.ack_loss,
+        delay_ms=args.rtt / 2.0, jitter_ms=args.jitter, seed=args.seed,
+        loss_schedule=parse_loss_schedule(args.loss_schedule))
+    # D7: one RTO per condition, derived from that condition RTT and then held
+    # fixed for the whole run, so the three systems stay comparable within a cell.
+    rto = args.rto if args.rto is not None else config.baseline_rto(args.rtt)
     sender = Sender(path=args.file, host=args.host, port=args.port, mode=args.mode,
                     window=args.window, run_id=run_id, log_dir=args.log_dir,
-                    rto=args.rto)
+                    rto=rto, impairment=impairment)
     try:
         metrics = sender.run()
     except TransferError as exc:

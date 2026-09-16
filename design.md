@@ -495,8 +495,12 @@ which is what lets the two logs be concatenated and interleaved during analysis.
   file size, software version/commit per RP-08) and the final metrics of specs.md §20.
 
 Event vocabulary: `SEND`, `RETX`, `ACK`, `TIMEOUT`, `TIMER_START`, `TIMER_STOP`, `SWITCH`,
-`DROP`, `CHECKSUM_FAIL`, `MALFORMED`, `DUPLICATE`, `DELIVER`, `START`, `START_ACK`, `FIN`,
-`FIN_ACK`, `ERROR`.
+`DROP`, `CHECKSUM_FAIL`, `MALFORMED`, `DUPLICATE`, `DELIVER`, `LOSS_CHANGE`, `START`,
+`START_ACK`, `FIN`, `FIN_ACK`, `ERROR`.
+
+`LOSS_CHANGE` was added in T4.2: a dynamic-loss run (E8) is only interpretable if the
+moment the condition changed is recorded alongside the protocol's reaction to it, and no
+other event in the vocabulary carries that.
 
 Design rules:
 
@@ -551,12 +555,12 @@ throughput.
 | D3 | Max payload / `SEGMENT_SIZE` | 1024 B | **Frozen** (T1.3) |
 | D4 | Initial sequence number | 0, segment-indexed | **Frozen** (T1.3) |
 | D5 | GBN ACK semantics | Highest in-order sequence received; no ACK before the first | **Frozen** (T3.1) |
-| D6 | SR ACK semantics | Per-segment, ACK = sequence acknowledged | Proposed |
-| D7 | Baseline RTO | `max(4 × RTT, 200 ms)` per condition, then fixed | Proposed |
+| D6 | SR ACK semantics | Per-segment, ACK = sequence acknowledged | **Frozen** (T4.4) |
+| D7 | Baseline RTO | `max(4 × RTT, 200 ms)` per condition, then fixed | **Frozen** (T4.9) |
 | D8 | Loss estimator | Sliding window of 50 outcomes, retx ratio | Proposed |
 | D9 | Thresholds / hysteresis | HIGH 0.05, LOW 0.02, count 3 | Needs calibration (T4) |
 | D10 | Transition mechanism | MODE handshake at quiescent window | Proposed |
-| D11 | Primary window size | 8 (source spec default) | Proposed |
+| D11 | Primary window size | 8 (source spec default) | **Frozen** (T4.9) |
 | D12 | Repetition count | 5 trials per cell | Proposed |
 | D13 | Seed policy | Recorded base seed, derived per trial | Proposed |
 | D14 | File size(s) | 1 MiB primary; 10 MiB secondary if time allows | Proposed |

@@ -19,19 +19,30 @@ global novelty (`specs.md` §30).
 
 ## Status
 
-**Phase 3 complete (M4)** — the first real ARQ baseline works. `protocol/gbn.py`
-implements Go-Back-N with a sliding window, a single timer on the oldest outstanding
-segment, cumulative ACKs, and range retransmission. 324 tests pass.
+**Phase 4 complete (M5, M6)** — both ARQ baselines exist and are tested under
+controlled loss. 397 tests pass.
 
-A 1 MiB transfer over loopback runs in 0.031 s with 8 segments in flight, against 0.109 s
-for the stop-and-wait placeholder — pipelining working as it should. Hashes match.
+`network/simulator.py` injects loss, one-way delay and jitter from a seeded RNG, so a
+condition replays exactly from a recorded seed. `protocol/sr.py` implements Selective
+Repeat: per-segment timers, out-of-order buffering, individual ACKs, and single-segment
+retransmission.
 
-GBN dropped in behind the strategy interface without changing the send loop, which is the
-property that lets SR (T4.5) and the hybrid (T5.4) follow the same way.
+The trade-off, measured rather than assumed — 1 MiB at 10% loss and 5% ACK loss, same
+seed, same window:
+
+| | retransmissions | time | integrity |
+| --- | --- | --- | --- |
+| GBN | 883 | 23.2 s | OK |
+| SR | 167 | 19.7 s | OK |
+
+That 5x gap under loss, against GBN's simpler state and cheaper clean-path behaviour, is
+exactly what the hybrid controller is meant to arbitrate.
 
 Frozen so far: **D1** byte layout, **D2** checksum coverage, **D3** segment size,
-**D4** sequence convention, **D5** GBN ACK semantics. Next up is **Phase 4 (T4.1–T4.9):
-the loss simulator, then Selective Repeat.**
+**D4** sequence convention, **D5** GBN ACK semantics, **D6** SR ACK semantics,
+**D7** baseline RTO, **D11** window size. Next up is **Phase 5 (T5.1–T5.8): the hybrid
+controller** — now unblocked, since the ordering rule required both baselines correct
+first.
 
 See the status snapshot in `tasks.md` for the current milestone map.
 
@@ -62,10 +73,23 @@ python receiver.py --port 8888 --output received.bin
 python sender.py --file sample.bin --host 127.0.0.1 --port 8888 --mode saw --window 8
 ```
 
-`--mode` accepts `saw`, `gbn`, `sr`, `hybrid` and `fixed-hybrid`. `gbn` (the default) and
-`saw` work today; the others report which task delivers them. `--window` sets the number of
-segments in flight and is ignored by `saw`. Each run writes
+`--mode` accepts `saw`, `gbn`, `sr`, `hybrid` and `fixed-hybrid`. `gbn` (the default),
+`sr` and `saw` work today; the others report which task delivers them. `--window` sets the
+number of segments in flight and is ignored by `saw`. Each run writes
 `logs/<run_id>/<endpoint>/events.csv` and `summary.json`.
+
+### Running under controlled loss
+
+```
+python sender.py --file sample.bin --mode sr --window 8 \
+    --loss 0.10 --ack-loss 0.05 --rtt 50 --jitter 5 --seed 99
+python sender.py --file sample.bin --mode gbn --loss-schedule 5:0.2,10:0.0
+```
+
+`--seed` makes a condition reproducible: the same seed replays the same drop sequence
+(RP-03). `--rtt` is the round trip, half applied on each direction, so the receiver needs
+the matching `--rtt` to carry the ACK half. `--loss-schedule` is `t:rate,t:rate` in
+seconds, for the dynamic-loss experiments.
 
 ## Tests
 
@@ -109,11 +133,12 @@ protocol/
   packet.py            wire format, checksum                       ✅
   strategy.py          strategy interface + stop-and-wait          ✅
   gbn.py               Go-Back-N: window, one timer, range retx     ✅
+  sr.py                Selective Repeat: per-segment timers + buffer ✅
   sr.py                Selective Repeat strategy                   (T4.*)
   hybrid.py            monitoring, thresholds, MODE handshake      (T5.*)
 network/
   udp.py               socket creation; Windows ICMP-reset contract ✅
-  simulator.py         loss, delay, jitter; seeded and reproducible (T4.1)
+  simulator.py         loss, delay, jitter; seeded and reproducible ✅
 experiments/
   run_experiment.py    automated runs                              (T8.2)
   analyze_results.py   aggregation, metrics, graphs                (T9.*)

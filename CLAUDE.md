@@ -69,7 +69,9 @@ true: the value is in the code, `specs.md` §16 records it **with its rationale*
 `design.md` §12 says **Frozen** instead of Proposed.
 
 **Frozen so far: D1** (byte layout), **D2** (checksum coverage), **D3** (`SEGMENT_SIZE`),
-**D4** (sequence convention), **D5** (GBN ACK = highest in-order sequence received). Everything still open carries a `# NOT FROZEN` comment in
+**D4** (sequence convention), **D5** (GBN ACK = highest in-order received), **D6** (SR ACK
+= exactly the segment named), **D7** (RTO = max(4xRTT, 200 ms) per condition),
+**D11** (window 8). Everything still open carries a `# NOT FROZEN` comment in
 `config.py` naming its decision ID and the task that freezes it.
 
 Record the rationale at freeze time, not retroactively at T10.2 — reconstructing it later
@@ -156,6 +158,15 @@ silent corruption and never presented as success (CC-01).
 - **`--mode saw` is a placeholder, not a system under evaluation.** The baselines being
   measured are `gbn` and `sr` (`specs.md` §18). Stop-and-wait exists because Phase 2 needed
   to move data before either real mode was written.
+- **Impairment is a wrapper, never a branch in protocol code.** `Impairment.wrap()`
+  returns the *raw socket unchanged* for a no-op condition, deliberately: the clean
+  baseline must not traverse code the impaired runs skip, or the comparison measures the
+  wrapper too. Each direction draws from its own seeded RNG so the forward drop sequence
+  is a pure function of the seed, independent of ACK timing (RP-03).
+- **Test corruption and loss must not be phase-locked to retransmissions.** A fixed
+  every-Nth corruption counter lines up with GBN's deterministic retransmission pattern,
+  re-corrupting the same segment on every attempt until the retry budget dies. That is a
+  test artifact, not a protocol bug — use a seeded probability instead.
 - **A strategy owns its timers but never logs.** Transitions are queued via `TimerTracker`
   and drained by the endpoint, which keeps logging on the endpoint side of the layering
   rule while still satisfying TO-02. `next_timeout()` exists so the send loop sizes its
@@ -171,12 +182,13 @@ silent corruption and never presented as success (CC-01).
 
 ## Current state
 
-**Phases 0–3 complete (M1–M4).** The packet layer is frozen, a file transfers end to end
-with matching hashes and full event logs, and Go-Back-N is implemented and tested at 0%
-loss; 324 tests pass.
+**Phases 0–4 complete (M1–M6).** Both ARQ baselines are implemented and pass the T4.8
+failure suite under simulated loss, delay and corruption; 397 tests pass. At 10% loss over
+1 MiB with the same seed, GBN resent 883 segments against SR's 167.
 
-Next is **Phase 4 (T4.1–T4.9)**, in this order for a reason: the loss simulator
-(`network/simulator.py`) lands *first* so Selective Repeat has a loss-capable test bed from
-its first line. Then D6 (SR ACK semantics), the SR sender and receiver, and T4.8's failure
-tests against **both** baselines — which is also where GBN finally gets validated under
-real network loss rather than a hand-driven drop.
+**Phase 5 (T5.1–T5.8) is now unblocked** — the ordering rule from source spec §41 required
+both baselines correct first, and T3.7 and T4.8 both pass. It is the correctness-critical
+phase: the statistics collector, D8 (the loss estimator, experiment-invalidating once
+frozen), the dual-threshold rule with hysteresis, and the MODE handshake at a quiescent
+window. Note that D9 (thresholds) is deliberately *not* frozen in Phase 5 — Phase 7
+calibrates it against real data.

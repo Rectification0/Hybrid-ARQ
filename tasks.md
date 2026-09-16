@@ -24,14 +24,14 @@ Per the source document §37, carried forward as the current baseline:
 | Wireshark packet visibility | ✅ Completed |
 | Custom packet format | ✅ Completed |
 | GBN | ✅ Completed |
-| SR | ⏭️ **Next** |
-| Loss simulation | ⏭️ **Next** |
-| Hybrid controller | ⬜ Not started |
+| SR | ✅ Completed |
+| Loss simulation | ✅ Completed |
+| Hybrid controller | ⏭️ **Next** |
 | Experiment automation | ⬜ Not started |
 | Analysis / graphs | ⬜ Not started |
 | Final demonstration | ⬜ Not started |
 
-Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5/M6** ⏭️ current · **M7–M11** pending.
+Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ⏭️ current · **M8–M11** pending.
 
 ---
 
@@ -144,35 +144,39 @@ driving a drop directly against the strategy; the networked version is T4.8.*
 
 Ordered so the simulator lands before SR, giving SR a loss-capable test bed from the start.
 
-- [ ] **T4.1** Implement `network/simulator.py`: `ImpairedSocket` with loss, one-way
+- [x] **T4.1** Implement `network/simulator.py`: `ImpairedSocket` with loss, one-way
       delay, jitter, a dedicated seeded RNG, and non-blocking delayed delivery.
       **Satisfies:** §17.1, §17.2, RP-03 · **Done when:** the same seed reproduces an identical
       drop sequence, and 0% loss / 0 delay is behaviourally identical to a raw socket.
-- [ ] **T4.2** Add ACK-direction impairment and the `loss_schedule` step function for
+- [x] **T4.2** Add ACK-direction impairment and the `loss_schedule` step function for
       dynamic conditions.
       **Satisfies:** §17.3, §25.3 · **Done when:** a scheduled loss change is visible in the event log.
-- [ ] **T4.3** Log `DROP` events distinctly from `CHECKSUM_FAIL`.
+- [x] **T4.3** Log `DROP` events distinctly from `CHECKSUM_FAIL`.
       **Satisfies:** IN-04
-- [ ] **T4.4** Freeze SR ACK semantics and document them.
+- [x] **T4.4** Freeze SR ACK semantics and document them.
       **Decides:** D6 · **Satisfies:** §16.6, SEQ-03
-- [ ] **T4.5** Implement the SR sender: per-segment ACK tracking, per-segment timers,
+- [x] **T4.5** Implement the SR sender: per-segment ACK tracking, per-segment timers,
       retention of unacked payloads, window boundaries, single-segment retransmission.
       **Satisfies:** FR-07, SR-01, SR-02, SR-03, SR-10
-- [ ] **T4.6** Implement the SR receiver: receive window, out-of-order buffering, individual
+- [x] **T4.6** Implement the SR receiver: receive window, out-of-order buffering, individual
       ACKs, in-order delivery on gap fill, duplicate suppression.
       **Satisfies:** SR-04 … SR-09
-- [ ] **T4.7** Unit tests: SR individual ACK processing; out-of-order buffering and
+- [x] **T4.7** Unit tests: SR individual ACK processing; out-of-order buffering and
       gap-fill delivery; duplicate handling; the half-sequence-space window assertion.
       **Satisfies:** §25.1
-- [ ] **T4.8** Failure tests against **both** baselines: single loss, multiple consecutive
+- [x] **T4.8** Failure tests against **both** baselines: single loss, multiple consecutive
       losses, random loss, ACK loss, artificial delay, packet corruption.
       **Satisfies:** §25.3, CC-02, CC-05, IN-03 · **Done when:** every case still produces a
       matching hash or a clearly reported failure — never silent corruption.
-- [ ] **T4.9** Freeze the baseline RTO policy and the primary window size.
+- [x] **T4.9** Freeze the baseline RTO policy and the primary window size.
       **Decides:** D7, D11 · **Satisfies:** §16.7, §16.8, §11, TO-01, TO-04
 
 **M5 complete when:** SR buffering and individual-retransmission tests pass.
 **M6 complete when:** controlled loss is reproducible from a recorded seed.
+*Done — D6, D7 and D11 frozen. Both baselines survive every T4.8 failure case with
+matching hashes. At 10% loss / 5% ACK loss with the same seed over 1 MiB, GBN resent 883
+segments and SR 167 — the trade-off the hybrid is built to exploit, measured rather than
+assumed. A recorded seed replays a transfer to the same retransmission count.*
 
 ## Phase 5 — Hybrid controller (M7)
 

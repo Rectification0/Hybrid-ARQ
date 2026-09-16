@@ -273,7 +273,7 @@ class StopAndWaitReceiver:
 
 #: Modes that exist today. "saw" is the Phase 2 placeholder, not a system under
 #: evaluation; the baselines being measured are "gbn" and "sr" (specs.md §18).
-IMPLEMENTED_MODES = ("saw", "gbn")
+IMPLEMENTED_MODES = ("saw", "gbn", "sr")
 
 
 def make_sender_strategy(mode: str, state: SenderTransferState, rto: float) -> SenderStrategy:
@@ -282,13 +282,22 @@ def make_sender_strategy(mode: str, state: SenderTransferState, rto: float) -> S
     if mode == "gbn":
         from protocol.gbn import GbnSender
         return GbnSender(state, rto)
+    if mode == "sr":
+        from protocol.sr import SrSender
+        return SrSender(state, rto)
     raise ValueError(f"no sender strategy for mode {mode!r}")
 
 
-def make_receiver_strategy(mode: str, state: ReceiverTransferState) -> ReceiverStrategy:
+def make_receiver_strategy(mode: str, state: ReceiverTransferState,
+                           window_size: int = 1) -> ReceiverStrategy:
+    """Build the receiving half. ``window_size`` comes from the sender's START,
+    so SR's receive buffer is sized to match the sender's window."""
     if mode == "saw":
         return StopAndWaitReceiver(state)
     if mode == "gbn":
         from protocol.gbn import GbnReceiver
         return GbnReceiver(state)
+    if mode == "sr":
+        from protocol.sr import SrReceiver
+        return SrReceiver(state, window_size)
     raise ValueError(f"no receiver strategy for mode {mode!r}")

@@ -56,7 +56,7 @@ INITIAL_SEQUENCE = 0        # FROZEN — D4 (T1.3)
 # Windows (specs.md §15, §16.7 — decision D11)
 # ---------------------------------------------------------------------------
 
-WINDOW_SIZE = 8             # NOT FROZEN — D11, frozen by T4.9
+WINDOW_SIZE = 8             # FROZEN — D11 (T4.9)
 
 # SR requires the receive window to be at most half the sequence space (SR-10).
 # Asserted in T4.7 rather than here, so a bad config fails a test, not an import.
@@ -74,9 +74,9 @@ SR_RECEIVE_WINDOW_SIZE = WINDOW_SIZE
 # conditions of E7, so the baseline is derived per condition and then held fixed
 # for the whole run.
 
-RTO_RTT_MULTIPLIER = 4.0    # NOT FROZEN — D7, frozen by T4.9
-RTO_FLOOR_S = 0.200         # NOT FROZEN — D7, frozen by T4.9
-RTO_S = 0.200               # NOT FROZEN — effective value; set per run from baseline_rto()
+RTO_RTT_MULTIPLIER = 4.0    # FROZEN — D7 (T4.9)
+RTO_FLOOR_S = 0.200         # FROZEN — D7 (T4.9)
+RTO_S = 0.200               # effective value; set per run from baseline_rto() (D7)
 
 
 def baseline_rto(rtt_ms: float) -> float:

@@ -331,7 +331,7 @@ def test_factory_builds_gbn_by_name():
 def test_factory_rejects_an_unimplemented_mode():
     state = SenderTransferState(segments=[b"a"], window_size=4)
     with pytest.raises(ValueError, match="no sender strategy"):
-        make_sender_strategy("sr", state, 1.0)
+        make_sender_strategy("hybrid", state, 1.0)
 
 
 # ---------------------------------------------------------------------------

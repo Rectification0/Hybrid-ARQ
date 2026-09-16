@@ -346,9 +346,31 @@ recorded in this section, and marked Frozen in `design.md` §12.
    value (0 already means "segment 0 arrived"), so the receiver **sends no ACK at all**
    until one arrives — safe because the sender's timer already covers a window whose first
    segment was lost.
-6. SR ACK semantics.
-7. Primary window size.
-8. Baseline timeout.
+6. ✅ **FROZEN (T4.4, D6)** — SR ACK semantics: **an ACK acknowledges exactly the one
+   segment it names**, not cumulatively. `ACK n` means "segment n arrived" and says nothing
+   about n-1. Duplicate ACKs are idempotent; `send_base` advances past the contiguous run
+   of acknowledged segments. Rationale: individual acknowledgement is what permits
+   individual retransmission (SR-10) — the entire point of SR. Consequence, stated because
+   it is the cost: a lost ACK is **not** repaired by the next one as it is under GBN's
+   cumulative rule, but by that segment's own timer expiring. Note that `ACK n` therefore
+   means different things under D5 and D6, which is exactly why a mode switch requires a
+   quiescent window (D10) — an ACK read under the wrong convention would acknowledge
+   segments that never arrived.
+7. ✅ **FROZEN (T4.9, D11)** — Primary window size: `WINDOW_SIZE = 8` outstanding
+   segments, identical for GBN, SR and Hybrid. Rationale: the source specification's own
+   default, and fairness requires not the *best* window but the *same* window within each
+   cell of the matrix (§18, RP-04). At 1024 B segments this puts 8 KiB in flight, enough
+   for GBN's range retransmission to cost visibly more than SR's single resend — which is
+   the effect being measured.
+8. ✅ **FROZEN (T4.9, D7)** — Baseline timeout: `RTO = max(4 x RTT, 200 ms)`, computed
+   once per experimental condition from that condition's RTT and then **held fixed for the
+   whole run**, recorded in `summary.json`. Implemented as `config.baseline_rto()`.
+   Rationale: a single absolute constant cannot serve both the 10 ms and 500 ms RTT cells
+   of E7 — too short and every condition drowns in spurious retransmissions, too long and
+   the fast conditions idle. Deriving it per condition keeps the three systems comparable
+   *within* each cell, which is what fairness actually requires (§11). No adaptive RTO:
+   RTT samples are measured for analysis only (Karn's rule) and never fed back, so the
+   comparison isolates retransmission strategy rather than timer tuning (§3).
 9. Loss-estimation formula.
 10. Switching threshold(s).
 11. Hysteresis rule.

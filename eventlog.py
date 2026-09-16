@@ -47,7 +47,7 @@ EVENT_COLUMNS = [
 #: silently produce an event that the T6.1 audit would never find.
 EVENT_NAMES = frozenset({
     "SEND", "RETX", "ACK", "TIMEOUT", "TIMER_START", "TIMER_STOP", "SWITCH",
-    "DROP", "CHECKSUM_FAIL", "MALFORMED", "DUPLICATE", "DELIVER",
+    "DROP", "CHECKSUM_FAIL", "MALFORMED", "DUPLICATE", "DELIVER", "LOSS_CHANGE",
     "START", "START_ACK", "FIN", "FIN_ACK", "ERROR",
 })
 
