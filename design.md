@@ -358,12 +358,26 @@ Asymmetric thresholds (`SWITCH_LOW < SWITCH_HIGH`) plus the consecutive-observat
 requirement give a dead band, which is what prevents a single unlucky loss burst from
 oscillating the mode (HY-09).
 
-**DECISION D9 — thresholds and hysteresis count.** Starting point for calibration:
-`SWITCH_HIGH = 0.05`, `SWITCH_LOW = 0.02`, `HYSTERESIS_COUNT = 3`, evaluation cadence every
-20 acked segments. These sit inside the loss grid of specs.md §17.1 so the matrix contains
-conditions on both sides of the boundary. They are **not** final: T4 in `tasks.md` calibrates
-them, and H-05 explicitly anticipates that bad thresholds make the hybrid worse than either
-fixed strategy.
+**DECISION D9 — thresholds and hysteresis count. FROZEN (T7.2):** `SWITCH_HIGH = 0.10`,
+`SWITCH_LOW = 0.02`, `HYSTERESIS_COUNT = 3`, evaluation cadence every 20 acked segments,
+minimum residence 1 s. Calibrated by 444 recorded transfers; the evidence, the rule applied
+to it and what the choice cost are in `experiments/results/calibration.md`, and specs.md
+§16.10–§16.11 record the values.
+
+Three things the sweep established that the recommendation above did not anticipate:
+
+- **The thresholds are readings of the estimator, not loss rates.** D8 over-reads loss under
+  GBN by roughly four to five times, so `SWITCH_HIGH = 0.10` fires at about 2% physical loss.
+  Quoting it as "switch at 10% loss" would be wrong.
+- **`SWITCH_HIGH` is nearly inert**: 0.05, 0.10 and 0.20 behave identically at every loss
+  level tested, and `SWITCH_LOW` is inert across 0.01–0.10. The dead band's width comes from
+  the estimator reading high under GBN and low under SR, not from the gap between the two
+  numbers.
+- **The hysteresis count is the only real lever on oscillation**, and it can only be
+  calibrated against a condition that changes. Under static and falling-loss conditions a
+  count of 1 scored best; under an alternating condition it made 60% more switches than the
+  condition justified. H-05's anticipation is confirmed, and §5 of the calibration report
+  lists every setting and condition under which the hybrid is worse than a fixed strategy.
 
 A `--mode fixed-hybrid` variant runs the controller's bookkeeping and MODE exchange but
 never switches, isolating switching overhead from switching benefit (specs.md §18).
@@ -623,7 +637,7 @@ throughput.
 | D6 | SR ACK semantics | Per-segment, ACK = sequence acknowledged | **Frozen** (T4.4) |
 | D7 | Baseline RTO | `max(4 × RTT, 200 ms)` per condition, then fixed | **Frozen** (T4.9) |
 | D8 | Loss estimator | Sliding window of 50 segment outcomes, retx ratio, recorded at ACK | **Frozen** (T5.2) |
-| D9 | Thresholds / hysteresis | HIGH 0.05, LOW 0.02, count 3 | Needs calibration (T4) |
+| D9 | Thresholds / hysteresis | HIGH 0.10, LOW 0.02, count 3, cadence 20 acked segments, min residence 1 s | **Frozen** (T7.2) |
 | D10 | Transition mechanism | MODE handshake at a quiescent window, epoch-guarded, abandoned on retry exhaustion | **Frozen** (T5.4) |
 | D11 | Primary window size | 8 (source spec default) | **Frozen** (T4.9) |
 | D12 | Repetition count | 5 trials per cell | Proposed |

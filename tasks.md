@@ -27,11 +27,11 @@ Per the source document §37, carried forward as the current baseline:
 | SR | ✅ Completed |
 | Loss simulation | ✅ Completed |
 | Hybrid controller | ✅ Completed |
-| Experiment automation | ⏭️ **Next** (Phase 7 calibration first) |
+| Experiment automation | ⏭️ **Next** |
 | Analysis / graphs | ⬜ Not started |
 | Final demonstration | ⬜ Not started |
 
-Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ✅ · **M8** ✅ · **M9–M11** pending (Phase 7 calibration is next).
+Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ✅ · **M8** ✅ · Phase 7 ✅ · **M9–M11** pending.
 
 ---
 
@@ -247,15 +247,30 @@ decision and the commit that produced it. 494 tests pass.*
 
 ## Phase 7 — Threshold calibration
 
-- [ ] **T7.1** Sweep `SWITCH_HIGH` / `SWITCH_LOW` / `HYSTERESIS_COUNT` over the loss grid and
+- [x] **T7.1** Sweep `SWITCH_HIGH` / `SWITCH_LOW` / `HYSTERESIS_COUNT` over the loss grid and
       record switch counts, residence times, and goodput per setting.
       **Satisfies:** HY-02, §16.10, §16.11
-- [ ] **T7.2** Freeze the chosen thresholds and hysteresis rule; record the calibration
+- [x] **T7.2** Freeze the chosen thresholds and hysteresis rule; record the calibration
       evidence that justified them.
       **Decides:** D9 · **Done when:** thresholds are in `config.py` and unchanged thereafter.
-- [ ] **T7.3** Note any setting that made the hybrid *worse* than a fixed strategy — this is
+- [x] **T7.3** Note any setting that made the hybrid *worse* than a fixed strategy — this is
       a reportable result, not a bug to bury.
       **Satisfies:** H-05
+
+**Phase 7 complete.** *D9 frozen at `SWITCH_HIGH = 0.10`, `SWITCH_LOW = 0.02`,
+`HYSTERESIS_COUNT = 3` from 444 recorded transfers
+(`experiments/results/calibration.md`, `calibration_runs.csv`). Three findings the
+recommendation did not anticipate: the thresholds are readings of the **estimator**, not
+loss rates — D8 over-reads loss under GBN by 4–5×, so 0.10 fires at about 2% physical loss;
+`SWITCH_HIGH` is inert across 0.05–0.20 and `SWITCH_LOW` across 0.01–0.10, so the dead band's
+width comes from the estimator's mode dependence rather than the gap between the numbers; and
+the hysteresis count is the only real lever on oscillation, measurable only against a
+condition that changes. A count of 1 scored best under static and falling loss and would have
+been frozen had the oscillating case not been run — it made 60% more switches than the
+condition justified. T7.3's findings are `calibration.md` §5: the hybrid never beats pure SR
+at any static loss level, is 24% worse than SR at 1% loss, and costs ~21% at 0% loss for
+monitoring alone; it beats GBN from 2% loss up (to 1.32×) and completed every 20%-loss trial
+where pure GBN aborted one.*
 
 ## Phase 8 — Experiments (M9)
 

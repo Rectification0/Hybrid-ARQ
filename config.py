@@ -110,20 +110,27 @@ RECEIVER_LINGER_S = 2.0             # keep re-ACKing a repeated FIN after FIN_AC
 # switching decision and invalidates every experiment already run.
 LOSS_WINDOW_SIZE = 50       # FROZEN — D8 (T5.2)
 
-# Dual thresholds with a dead band: SWITCH_LOW < SWITCH_HIGH. Both sit inside
-# the loss grid of §17.1, so the experimental matrix contains conditions on
-# either side of the boundary.
-SWITCH_HIGH = 0.05          # NOT FROZEN — D9, enter SR above this; frozen by T7.2
-SWITCH_LOW = 0.02           # NOT FROZEN — D9, return to GBN below this; frozen by T7.2
+# Dual thresholds with a dead band, on the *estimator's* scale rather than the
+# physical loss rate — D8 over-reads loss under GBN, so these are not loss
+# percentages (specs.md §16.9, §16.10). Calibrated by the recorded sweep in
+# experiments/results/: 418 transfers over the §17.1 loss grid, a falling-loss
+# schedule and an oscillating one. Evidence and cost in calibration.md.
+SWITCH_HIGH = 0.10          # FROZEN — D9 (T7.2), enter SR above this
+SWITCH_LOW = 0.02           # FROZEN — D9 (T7.2), return to GBN below this
 
-# Consecutive confirming observations required before a switch, so a single
-# unlucky burst cannot oscillate the mode (HY-09).
-HYSTERESIS_COUNT = 3        # NOT FROZEN — D9, frozen by T7.2
+# Consecutive confirming observations required before a switch (HY-09). The
+# sweep is unambiguous that this, not the thresholds, is the lever that stops
+# oscillation: under a condition crossing the boundary five times, a count of 1
+# made 8 switches and a count of 3 made 5.3.
+HYSTERESIS_COUNT = 3        # FROZEN — D9 (T7.2)
 
 # Evaluation cadence, in acked segments, and the minimum time a mode must be
-# held before it may be left again (HY-03).
-EVALUATION_INTERVAL_SEGMENTS = 20   # NOT FROZEN — D9, frozen by T7.2
-MIN_MODE_RESIDENCE_S = 1.0          # NOT FROZEN — D9, frozen by T7.2
+# held before it may be left again (HY-03). Held fixed across every run of the
+# calibration sweep rather than swept, so every comparison that justified the
+# thresholds above was made at these two values — which is why changing either
+# invalidates the calibration exactly as changing a threshold would.
+EVALUATION_INTERVAL_SEGMENTS = 20   # FROZEN — D9 (T7.2)
+MIN_MODE_RESIDENCE_S = 1.0          # FROZEN — D9 (T7.2)
 
 # Starting mode for a hybrid transfer. Both endpoints read this same value, so
 # the receiver builds the right strategy from a START that names only "hybrid" —
@@ -230,15 +237,16 @@ _DECISIONS = (
     ("D6", "SR ACK semantics", "T4.4", "protocol/sr.py", None),
     ("D7", "baseline RTO policy", "T4.9", "config.baseline_rto()", "rto_s"),
     ("D8", "loss estimator", "T5.2", "protocol/hybrid.py", "loss_window_size"),
+    ("D9", "switching thresholds and hysteresis", "T7.2",
+     "experiments/results/calibration.md", "switch_high"),
     ("D10", "mode transition mechanism", "T5.4", "sender.py / receiver.py", None),
     ("D11", "primary window size", "T4.9", "config.WINDOW_SIZE", "window_size"),
 )
 
-#: Still open, with the task that closes each. D9 is the experiment-invalidating
-#: one: it is deliberately left to Phase 7 so the thresholds are calibrated
-#: against real data rather than guessed before any exists.
+#: Still open, with the task that closes each. All three are experiment *scale*
+#: decisions rather than protocol behaviour, which is why they can wait for T8.1:
+#: nothing already measured changes when they are settled.
 _OPEN_DECISIONS = (
-    ("D9", "switching thresholds and hysteresis", "T7.2"),
     ("D12", "experiment repetition count", "T8.1"),
     ("D13", "random-seed policy", "T8.1"),
     ("D14", "file size(s)", "T8.1"),

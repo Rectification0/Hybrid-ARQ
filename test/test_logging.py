@@ -463,9 +463,14 @@ def test_summary_records_the_freeze_state_of_every_decision(tmp_path):
         assert set(decisions) == {f"D{n}" for n in range(1, 15)}, "all of design.md §12"
         assert decisions["D8"]["status"] == "frozen"
         assert decisions["D8"]["value"] == config.LOSS_WINDOW_SIZE
-        assert decisions["D9"]["status"] == "open"
+        assert decisions["D9"]["status"] == "frozen"       # T7.2 froze it
         assert decisions["D9"]["frozen_by"] == "T7.2"
+        assert decisions["D9"]["value"] == config.SWITCH_HIGH
         assert decisions["D3"]["value"] == config.SEGMENT_SIZE
+        # The experiment-scale decisions are still open until T8.1, so a run
+        # recorded today can be told apart from one recorded after they settle.
+        assert decisions["D14"]["status"] == "open"
+        assert decisions["D14"]["frozen_by"] == "T8.1"
 
 
 def test_summary_records_the_software_that_produced_it(tmp_path):

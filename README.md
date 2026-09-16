@@ -45,10 +45,24 @@ about what an ACK means and no packet may ever be read under the wrong conventio
 
 Frozen so far: **D1** byte layout, **D2** checksum coverage, **D3** segment size,
 **D4** sequence convention, **D5** GBN ACK semantics, **D6** SR ACK semantics,
-**D7** baseline RTO, **D8** loss estimator, **D10** transition mechanism, **D11** window
-size. **D9** (the switching thresholds) is deliberately still open: Phase 7 calibrates it
-against real data, and freezing it early would mean calibrating against a guess. Next up
-is **Phase 7 (T7.1–T7.3): threshold calibration**.
+**D7** baseline RTO, **D8** loss estimator, **D9** switching thresholds, **D10** transition
+mechanism, **D11** window size. Only the experiment-scale decisions (D12–D14: trial count,
+seed policy, file size) remain, and T8.1 settles them. Next up is **Phase 8 (T8.1–T8.7):
+the experiment sweep**.
+
+D9 was calibrated rather than guessed — 444 recorded transfers, written up in
+[`experiments/results/calibration.md`](experiments/results/calibration.md). Three findings
+worth knowing before reading any hybrid result:
+
+- **The thresholds are readings of the loss *estimator*, not loss rates.** The estimator
+  over-reads loss under GBN by four to five times, because one drop resends the whole
+  window, so `SWITCH_HIGH = 0.10` fires at about 2% physical loss.
+- **The hybrid never beats pure SR under sustained static loss** — it starts in GBN and must
+  earn the evidence to leave. It beats GBN from 2% loss upward (to 1.32×) and completed
+  every 20%-loss trial where pure GBN exhausted its retry budget and aborted.
+- **The hysteresis count is the only real lever on oscillation**, and only a condition that
+  *changes* can calibrate it. A count of 1 scored best under static and falling loss; under
+  an alternating condition it made 60% more switches than the condition justified.
 
 The logs are the deliverable as much as the code, so they are audited rather than assumed:
 `metrics.py` derives every specs.md §20 metric from `events.csv` alone, and the tests assert
@@ -164,6 +178,8 @@ network/
   udp.py               socket creation; Windows ICMP-reset contract ✅
   simulator.py         loss, delay, jitter; seeded and reproducible ✅
 experiments/
+  calibrate_thresholds.py  the D9 calibration sweep                ✅
+  results/             recorded calibration evidence (T7.2)        ✅
   run_experiment.py    automated runs                              (T8.2)
   analyze_results.py   aggregation, metrics, graphs                (T9.*)
   configs/             per-experiment configuration (E1–E8)        (T8.3)

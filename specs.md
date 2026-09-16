@@ -394,8 +394,36 @@ recorded in this section, and marked Frozen in `design.md` §12.
    `SWITCH_HIGH` is not a physical loss percentage, and `SWITCH_LOW` is evaluated on a
    different scale from `SWITCH_HIGH`. Calibration (T7.1) works against the estimator as
    defined here, not against the nominal loss rate.
-10. Switching threshold(s).
-11. Hysteresis rule.
+10. ✅ **FROZEN (T7.2, D9)** — Switching thresholds: `SWITCH_HIGH = 0.10` (enter SR),
+    `SWITCH_LOW = 0.02` (return to GBN). Calibrated by a recorded sweep of 444 transfers
+    (`experiments/results/calibration.md`): the static loss grid of §17.1 × five entry
+    thresholds × three hysteresis counts, a falling-loss schedule, an oscillating schedule,
+    a confirmation run against all three fixed systems, and an RTT check.
+    **These are readings of the D8 estimator, not loss percentages.** Because the estimator
+    over-reads loss under GBN (§16.9), `SWITCH_HIGH = 0.10` fires at roughly 2% *physical*
+    loss on the test bed; at 5% physical loss the estimator clears 0.20 and at 10% it clears
+    0.50. The sweep found 0.05, 0.10 and 0.20 indistinguishable at every loss level, so the
+    entry decision is governed by whether loss is occurring at all rather than by where in
+    that range the threshold sits; 0.10 was the best-scoring of them. `SWITCH_LOW = 0.02` was
+    inert across 0.01–0.10 in the falling-loss sweep and is frozen at the SR-side reading of
+    the same physical crossover that 0.10 represents on the GBN side — the two describe one
+    boundary at roughly 2% loss, seen through an estimator that reads high under GBN and low
+    under SR.
+11. ✅ **FROZEN (T7.2, D9)** — Hysteresis rule: `HYSTERESIS_COUNT = 3` consecutive confirming
+    evaluations, evaluated every `EVALUATION_INTERVAL_SEGMENTS = 20` acknowledged segments,
+    with `MIN_MODE_RESIDENCE_S = 1.0` before a mode may be left again. The cadence and the
+    minimum residence were **held fixed** across every run of the sweep rather than varied,
+    so every comparison that justified the thresholds was made at those values and changing
+    either invalidates the calibration exactly as changing a threshold would.
+    Rationale: the count is the only parameter that governs oscillation, and the sweep is
+    unambiguous about it. Under a condition alternating across the crossover five times, a
+    count of 1 made 8.0 switches, a count of 2 made 7.0, and a count of 3 made 5.3 — with
+    goodput within 1% across all three, so the extra transitions bought nothing. A count of 1
+    scored *best* under static and falling-loss conditions and would have been chosen had the
+    oscillating case not been measured; it is excluded because HY-09 requires rapid repeated
+    transitions to be prevented. The cost is recorded in `calibration.md` §5: at a 256 KiB
+    transfer a count of 3 never returns to GBN within the transfer, because it needs roughly
+    110 segments of post-change traffic to confirm.
 12. ✅ **FROZEN (T5.4, D10)** — Safe mode-transition mechanism: an explicit **MODE
     handshake at a quiescent window**. The sender stops introducing new segments while
     continuing to service timers under the current mode; at `send_base == next_seq` it

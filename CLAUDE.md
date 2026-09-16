@@ -71,19 +71,27 @@ true: the value is in the code, `specs.md` §16 records it **with its rationale*
 **Frozen so far: D1** (byte layout), **D2** (checksum coverage), **D3** (`SEGMENT_SIZE`),
 **D4** (sequence convention), **D5** (GBN ACK = highest in-order received), **D6** (SR ACK
 = exactly the segment named), **D7** (RTO = max(4xRTT, 200 ms) per condition),
-**D8** (loss estimator: 50 segment outcomes, recorded at ACK), **D10** (MODE handshake at a
-quiescent window), **D11** (window 8). Everything still open carries a `# NOT FROZEN`
-comment in `config.py` naming its decision ID and the task that freezes it.
+**D8** (loss estimator: 50 segment outcomes, recorded at ACK), **D9** (thresholds 0.10/0.02,
+hysteresis 3), **D10** (MODE handshake at a quiescent window), **D11** (window 8). Only the
+experiment-scale decisions D12–D14 remain open, for T8.1; each still carries a
+`# NOT FROZEN` comment in `config.py` naming its decision ID and the task that freezes it.
 
 Record the rationale at freeze time, not retroactively at T10.2 — reconstructing it later
 from memory is how a frozen value becomes an unexplained one.
 
-Two freezes are experiment-invalidating and must not be touched casually once set:
-**D8** (loss estimator, frozen at T5.2) and **D9** (switching thresholds, still open).
-Changing either after the sweep means re-running every experiment. D9 is deliberately left
-open until Phase 7 calibrates it against real data — which is also why the Phase 5 tests
-supply their own thresholds rather than reading the config defaults: they pin the rule, not
-the numbers, so calibration does not have to rewrite them.
+Two freezes are experiment-invalidating and must not be touched casually: **D8** (loss
+estimator, T5.2) and **D9** (thresholds and hysteresis, T7.2). Changing either means
+re-running every experiment — and for D9 that now includes re-running the 444-transfer
+calibration sweep, since `EVALUATION_INTERVAL_SEGMENTS` and `MIN_MODE_RESIDENCE_S` were held
+fixed throughout it and are frozen by the same evidence. `test/test_calibration.py` asserts
+`config.py` still matches what the sweep chose, so the frozen value cannot drift from the
+evidence.
+
+**The thresholds are readings of the estimator, not loss rates.** D8 over-reads loss under
+GBN by 4–5×, so `SWITCH_HIGH = 0.10` fires at roughly 2% physical loss. Never describe it as
+"switch at 10% loss". `experiments/results/calibration.md` §5 lists every condition under
+which the hybrid is *worse* than a fixed strategy; that section is the honest core of the
+evaluation, not an appendix.
 
 The wire format is likewise load-bearing: changing MAGIC, the struct layout or the
 `PacketType` numbering invalidates every capture and log already recorded.
