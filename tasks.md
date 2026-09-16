@@ -22,8 +22,8 @@ Per the source document §37, carried forward as the current baseline:
 | UDP sender/receiver test | ✅ Completed |
 | Wireshark installation | ✅ Completed |
 | Wireshark packet visibility | ✅ Completed |
-| Custom packet format | ⏭️ **Next** |
-| GBN | ⬜ Not started |
+| Custom packet format | ✅ Completed |
+| GBN | ⏭️ **Next** |
 | SR | ⬜ Not started |
 | Loss simulation | ⬜ Not started |
 | Hybrid controller | ⬜ Not started |
@@ -31,7 +31,7 @@ Per the source document §37, carried forward as the current baseline:
 | Analysis / graphs | ⬜ Not started |
 | Final demonstration | ⬜ Not started |
 
-Milestone map: **M1** ✅ · **M2** ⏭️ current · **M3–M11** pending.
+Milestone map: **M1** ✅ · **M2** ✅ · **M3** ⏭️ current · **M4–M11** pending.
 
 ---
 
@@ -54,29 +54,29 @@ Milestone map: **M1** ✅ · **M2** ⏭️ current · **M3–M11** pending.
 
 ## Phase 1 — Packet layer (M2)
 
-- [ ] **T1.1** Freeze the binary packet format: field order, sizes, endianness, packing.
+- [x] **T1.1** Freeze the binary packet format: field order, sizes, endianness, packing.
       **Decides:** D1 · **Satisfies:** §5, §16.1 · **Done when:** the `struct` format string
       and offset table are written into the `packet.py` docstring and `specs.md` §5 is updated
       from "suggested" to frozen.
-- [ ] **T1.2** Freeze checksum algorithm and coverage.
+- [x] **T1.2** Freeze checksum algorithm and coverage.
       **Decides:** D2 · **Satisfies:** §16.4, IN-01 · **Done when:** coverage is documented and
       a deliberately flipped bit in *any* header field is detected by a test.
-- [ ] **T1.3** Freeze `SEGMENT_SIZE` (max DATA payload) and the initial sequence-number
+- [x] **T1.3** Freeze `SEGMENT_SIZE` (max DATA payload) and the initial sequence-number
       convention.
       **Decides:** D3, D4 · **Satisfies:** §16.2, §16.3, SEQ-01, SEQ-02
       **Done when:** values are in `config.py` and the header+payload total is confirmed under
       the path MTU so no IP fragmentation appears in captures.
-- [ ] **T1.4** Implement `PacketType`, `Packet`, `encode()`, `decode()`, and the
+- [x] **T1.4** Implement `PacketType`, `Packet`, `encode()`, `decode()`, and the
       `PacketError` hierarchy.
       **Satisfies:** §5.1, FR-04 · **Done when:** `decode` rejects a bad packet before any
       caller can read its payload.
-- [ ] **T1.5** Define the START / START_ACK / FIN / FIN_ACK / MODE control payloads.
+- [x] **T1.5** Define the START / START_ACK / FIN / FIN_ACK / MODE control payloads.
       **Satisfies:** §5.1, §6 · **Done when:** each is round-trip encodable and documented.
-- [ ] **T1.6** Unit tests: encode/decode round trip (including empty and maximum payload);
+- [x] **T1.6** Unit tests: encode/decode round trip (including empty and maximum payload);
       checksum generation and validation; rejection of short, bad-MAGIC, bad-VERSION,
       unknown-TYPE, length-mismatch and corrupted packets; sequence-number handling.
       **Satisfies:** §25.1 · **Done when:** all pass and every `PacketError` subclass has a test.
-- [ ] **T1.7** Replace the temporary `TEST_PACKET_n` strings with real encoded packets and
+- [x] **T1.7** Replace the temporary `TEST_PACKET_n` strings with real encoded packets and
       confirm the header is readable at fixed offsets in Wireshark.
       **Satisfies:** FR-12, WS-04, WS-05 · **Done when:** a capture shows DATA with a
       readable sequence value.

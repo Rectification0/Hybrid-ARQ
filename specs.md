@@ -82,27 +82,42 @@ Out of scope, explicitly:
 
 ## 5. Packet Specification
 
-Initial proposed layout:
+**FROZEN** (T1.1, T1.3 — decisions D1, D3, D4). The authoritative definition is the
+docstring of `protocol/packet.py`; this section records the same layout.
 
 ```
 MAGIC | VERSION | TYPE | FLAGS | SEQUENCE | ACK | WINDOW | PAYLOAD_LENGTH | CHECKSUM | PAYLOAD
 ```
 
-| Field | Suggested size | Meaning |
-| --- | --- | --- |
-| MAGIC | 2 bytes | Identifies protocol packets |
-| VERSION | 1 byte | Packet-format version |
-| TYPE | 1 byte | DATA, ACK, or control type |
-| FLAGS | 1 byte | Optional control flags |
-| SEQUENCE | 4 bytes | DATA sequence number |
-| ACK | 4 bytes | Acknowledgement number |
-| WINDOW | 2 bytes | Window information |
-| PAYLOAD_LENGTH | 2 bytes | Payload length |
-| CHECKSUM | 4 bytes | Integrity value |
-| PAYLOAD | Variable | Data/control payload |
+Network byte order (big-endian), no implicit padding: `struct.Struct("!HBBBIIHHI")`,
+a fixed **21-byte** header.
 
-Requirement: **exact byte order, checksum coverage, maximum payload size, and header
-packing must be frozen in `protocol/packet.py` before final experiments.**
+| Offset | Field | Size | Value / Meaning |
+| --- | --- | --- | --- |
+| 0 | MAGIC | 2 bytes | `0x4841`, ASCII `"HA"` — identifies protocol packets |
+| 2 | VERSION | 1 byte | `1` |
+| 3 | TYPE | 1 byte | DATA=1, ACK=2, START=3, START_ACK=4, FIN=5, FIN_ACK=6, MODE=7 |
+| 4 | FLAGS | 1 byte | Reserved, `0` |
+| 5 | SEQUENCE | 4 bytes | DATA segment index (not a byte offset) |
+| 9 | ACK | 4 bytes | Acknowledgement number |
+| 13 | WINDOW | 2 bytes | Window information |
+| 15 | PAYLOAD_LENGTH | 2 bytes | Payload length in bytes |
+| 17 | CHECKSUM | 4 bytes | CRC-32, see below |
+| 21 | PAYLOAD | Variable | Data/control payload |
+
+**Checksum coverage (D2):** CRC-32 (`zlib.crc32`) over the full 21-byte header **with the
+CHECKSUM field zeroed**, followed by the payload — that is, every byte of the packet. A
+corrupted SEQUENCE, TYPE or WINDOW is therefore detected, not only a corrupted payload.
+Coverage cannot be inferred from the wire bytes, which is why it is written down in both
+places. This detects accidental corruption only; it is not a MAC.
+
+**Maximum DATA payload (D3):** `SEGMENT_SIZE = 1024` bytes, so 1045 bytes on the wire —
+under the 1500-byte Ethernet MTU, confirmed fragmentation-free in a loopback capture
+(T1.7). PAYLOAD_LENGTH is 2 bytes, so the format permits 65535; 1024 is the configured
+limit DATA is held to.
+
+Control payloads (START, START_ACK, FIN, FIN_ACK, MODE) are compact UTF-8 JSON objects
+with sorted keys, so identical logical content always produces identical bytes.
 
 ### 5.1 Packet Types
 
@@ -301,10 +316,26 @@ size, and output directory to be specified **without changing protocol code**.
 
 ## 16. Decisions to Freeze Before Final Experiments
 
-1. Exact packet byte layout and endianness.
-2. Initial sequence-number convention.
-3. Maximum DATA payload size.
-4. Checksum algorithm and coverage.
+Frozen items record their final value here. An item is frozen only when it is in the code,
+recorded in this section, and marked Frozen in `design.md` §12.
+
+1. ✅ **FROZEN (T1.1, D1)** — Exact packet byte layout and endianness:
+   `struct.Struct("!HBBBIIHHI")`, big-endian, no padding, 21-byte header, MAGIC `0x4841`
+   (`"HA"`), VERSION 1. Full offset table in §5. Rationale: explicit `!` prevents
+   platform-dependent alignment that would silently break a cross-machine run; an ASCII
+   MAGIC makes the packet identifiable in the Wireshark ASCII pane without a dissector.
+2. ✅ **FROZEN (T1.3, D4)** — Initial sequence-number convention: first DATA segment is
+   `0`, and sequence numbers are **segment indices**, not byte offsets. Rationale: window
+   arithmetic, logs and captures stay directly comparable to textbook GBN/SR. Wraparound is
+   out of scope (SEQ-04) — uint32 at 1 KiB segments covers ~4 TiB per transfer.
+3. ✅ **FROZEN (T1.3, D3)** — Maximum DATA payload size: `SEGMENT_SIZE = 1024` bytes
+   (1045 on the wire). Rationale: under the Ethernet MTU so captures show no IP
+   fragmentation; verified fragmentation-free in T1.7.
+4. ✅ **FROZEN (T1.2, D2)** — Checksum algorithm and coverage: CRC-32 (`zlib.crc32`) over
+   the header with CHECKSUM zeroed plus the payload — every byte of the packet. Rationale:
+   catches corruption in any header field, not just the payload; deterministic across
+   Python versions; cheap. Verified by an exhaustive single-bit-flip test over all 168
+   header bits (T1.6).
 5. GBN ACK semantics.
 6. SR ACK semantics.
 7. Primary window size.

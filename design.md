@@ -534,10 +534,10 @@ throughput.
 
 | ID | Decision | Recommendation | Status |
 | --- | --- | --- | --- |
-| D1 | Byte order / packing | `!HBBBIIHHI`, big-endian, no padding | Proposed |
-| D2 | Checksum algorithm + coverage | CRC-32 over header (checksum zeroed) + payload | Proposed |
-| D3 | Max payload / `SEGMENT_SIZE` | 1024 B | Proposed |
-| D4 | Initial sequence number | 0, segment-indexed | Proposed |
+| D1 | Byte order / packing | `!HBBBIIHHI`, big-endian, no padding, MAGIC 0x4841 | **Frozen** (T1.1) |
+| D2 | Checksum algorithm + coverage | CRC-32 over header (checksum zeroed) + payload | **Frozen** (T1.2) |
+| D3 | Max payload / `SEGMENT_SIZE` | 1024 B | **Frozen** (T1.3) |
+| D4 | Initial sequence number | 0, segment-indexed | **Frozen** (T1.3) |
 | D5 | GBN ACK semantics | Highest in-order sequence received | Proposed |
 | D6 | SR ACK semantics | Per-segment, ACK = sequence acknowledged | Proposed |
 | D7 | Baseline RTO | `max(4 × RTT, 200 ms)` per condition, then fixed | Proposed |

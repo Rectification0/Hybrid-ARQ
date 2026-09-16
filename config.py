@@ -42,15 +42,15 @@ PORT = 8888                 # UDP port; matches the M1 Wireshark filter udp.port
 
 # Max DATA payload in bytes. 21-byte header + 1024 = 1045, well under a 1500-byte
 # Ethernet MTU, so no IP fragmentation muddies the Wireshark evidence (§22).
-SEGMENT_SIZE = 1024         # NOT FROZEN — D3, frozen by T1.3
+SEGMENT_SIZE = 1024         # FROZEN — D3 (T1.3)
 
 # Sequence numbers are segment indices, not byte offsets; first DATA segment is 0.
-INITIAL_SEQUENCE = 0        # NOT FROZEN — D4, frozen by T1.3
+INITIAL_SEQUENCE = 0        # FROZEN — D4 (T1.3)
 
-# Header is 21 bytes (design.md §3.1). Kept here so the receiver can size its
-# socket reads without importing the packet layer's struct definition.
-HEADER_SIZE = 21            # NOT FROZEN — D1, frozen by T1.1
-MAX_DATAGRAM_SIZE = HEADER_SIZE + SEGMENT_SIZE
+# HEADER_SIZE and MAX_DATAGRAM_SIZE deliberately do NOT live here. They are
+# derived from the frozen struct format, not tunable, so protocol.packet owns
+# them — duplicating the value 21 in two files is exactly how a wire format
+# drifts. Import them from protocol.packet.
 
 # ---------------------------------------------------------------------------
 # Windows (specs.md §15, §16.7 — decision D11)
