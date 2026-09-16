@@ -1,20 +1,22 @@
 """Environment + wire-format smoke test (T0.1, T1.7).
 
-Originally the M1 connectivity spike, which sent plain ``TEST_PACKET_n``
-strings. Per T1.7 those placeholders are gone: this now sends **real encoded
-packets** in the frozen format, so the same Wireshark check that proved
+Originally the M1 connectivity spike ``test_udp.py``, which sent plain
+``TEST_PACKET_n`` strings. Per T1.7 those placeholders are gone: this now sends
+**real encoded packets** in the frozen format, so the same Wireshark check that proved
 connectivity in M1 now also proves the header is readable at fixed offsets
 (FR-12, WS-04, WS-05).
 
 It is deliberately not a protocol test — it asserts nothing about ARQ behavior,
 sends no retransmissions, and expects no ACKs. The packet layer is covered by
 test/test_packet.py; this exists to confirm the environment end to end and to
-produce something to look at in Wireshark.
+produce something to look at in Wireshark. It is named ``smoke_udp.py`` rather
+than ``test_udp.py`` precisely because it is a script: under the old name pytest
+matched it as a test module and imported it during collection.
 
 Run alongside test/spike_receiver.py, not the real receiver:
 
     python test/spike_receiver.py      # terminal 1
-    python test_udp.py                 # terminal 2
+    python smoke_udp.py                # terminal 2
 
 Wireshark / tshark filter:  udp.port == 8888
 """

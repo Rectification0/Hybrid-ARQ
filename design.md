@@ -101,9 +101,11 @@ Hybrid-ARQ/
 └── README.md
 ```
 
-Note on current repo state: `receiver.py` and `test_udp.py` at the project root are the M1
-connectivity spike (plain `TEST_PACKET_n` strings). `receiver.py` is superseded by the real
-receiver in this design; `test_udp.py` is retained only as the environment smoke test.
+Note on repo state: the M1 connectivity spike (plain `TEST_PACKET_n` strings) has been
+retired. Its listener moved to `test/spike_receiver.py` in Phase 1 so the name `receiver.py`
+stays free for the real receiver, and its sender was renamed `smoke_udp.py` and rewritten in
+T1.7 to emit real encoded packets. `smoke_udp.py` is retained only as the environment and
+wire-format smoke test; it is a script, not part of the pytest suite.
 
 ### 2.2 Technology stack
 

@@ -51,8 +51,11 @@ docstring of `protocol/packet.py`. `specs.md` §5 and §16 record the same value
 ## Tests
 
 ```
-python -m pytest test/ -q
+python -m pytest -q
 ```
+
+`pytest.ini` pins collection to `test/`, so a bare `pytest` runs the suite and nothing
+else. `smoke_udp.py` is a script you run by hand, not a test module.
 
 ## Which receiver is the real one
 
@@ -61,7 +64,8 @@ The M1 spike listener now lives at **`test/spike_receiver.py`**, so the name
 spike has no windows, no ACKs, no retransmission and writes no file — it decodes packets
 and prints their headers, nothing more. Nothing should import it.
 
-`test_udp.py` is kept deliberately as the environment smoke test. Per T1.7 it no longer
+`smoke_udp.py` (renamed from `test_udp.py`, which pytest would otherwise try to collect as
+a test module) is kept deliberately as the environment smoke test. Per T1.7 it no longer
 sends `TEST_PACKET_n` strings: it sends real encoded packets, so the same Wireshark check
 that proved connectivity in M1 now also proves the header is readable at fixed offsets.
 
@@ -69,7 +73,7 @@ To run the smoke test, in two terminals:
 
 ```
 python test/spike_receiver.py     # terminal 1 — the M1 spike listener
-python test_udp.py                # terminal 2
+python smoke_udp.py               # terminal 2
 ```
 
 Wireshark filter: `udp.port == 8888`. On Windows, loopback traffic needs the npcap

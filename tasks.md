@@ -38,7 +38,8 @@ Milestone map: **M1** ✅ · **M2** ✅ · **M3** ⏭️ current · **M4–M11**
 ## Phase 0 — Project skeleton (M1 completion)
 
 - [x] **T0.1** Verify Python 3, UDP send/receive, and Wireshark packet visibility.
-      *Done — `test_udp.py` + root `receiver.py` spike, packets visible on `udp.port == 8888`.*
+      *Done — the M1 spike (since renamed `smoke_udp.py` + `test/spike_receiver.py`),
+      packets visible on `udp.port == 8888`.*
 - [x] **T0.2** Create the directory structure from `design.md` §2.1 with `__init__.py` files
       and `.gitkeep` in `logs/`, `captures/`, `plots/`.
       **Done when:** `import protocol, network` succeeds from the project root.
@@ -48,9 +49,12 @@ Milestone map: **M1** ✅ · **M2** ✅ · **M3** ⏭️ current · **M4–M11**
 - [x] **T0.4** Initialize Git; commit the skeleton, the source `.docx`, and these three docs.
       **Satisfies:** RP-08 · **Done when:** `git log` has an initial commit and later runs can
       cite a commit hash.
-- [x] **T0.5** Retire the M1 spike: keep `test_udp.py` as the environment smoke test, and
-      note in `README.md` that root `receiver.py` is superseded by the real receiver (T2.2).
+- [x] **T0.5** Retire the M1 spike: keep the smoke test, and note in `README.md` that root
+      `receiver.py` is superseded by the real receiver (T2.2).
       **Done when:** no ambiguity about which receiver is the real one.
+      *Done — the spike listener moved to `test/spike_receiver.py` rather than being left at
+      `receiver.py` to be overwritten, and `test_udp.py` was renamed `smoke_udp.py` so pytest
+      does not collect a runnable script as a test module.*
 
 ## Phase 1 — Packet layer (M2)
 

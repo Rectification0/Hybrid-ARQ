@@ -11,7 +11,7 @@ no state machine. The real receiver is written in T2.2 at the project root
 (``receiver.py``) and owns all of that. Nothing should import this module.
 
     python test/spike_receiver.py      # terminal 1
-    python test_udp.py                 # terminal 2
+    python smoke_udp.py                # terminal 2
 """
 
 import argparse
