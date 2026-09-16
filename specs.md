@@ -336,7 +336,16 @@ recorded in this section, and marked Frozen in `design.md` §12.
    catches corruption in any header field, not just the payload; deterministic across
    Python versions; cheap. Verified by an exhaustive single-bit-flip test over all 168
    header bits (T1.6).
-5. GBN ACK semantics.
+5. ✅ **FROZEN (T3.1, D5)** — GBN ACK semantics: **an ACK carries the highest in-order
+   sequence number received**, so `ACK n` means "0..n arrived" and the sender advances
+   `base` to `n+1`. ACKs are cumulative (GBN-01). An ACK below `base` is stale and is
+   ignored; so is an ACK at or above `next_seq`, which acknowledges something never sent
+   (GBN-03). Rationale: the value reads directly off a Wireshark capture as what actually
+   arrived, with no off-by-one for the reader to apply. Corner case, stated because the
+   convention requires it: before the first in-order segment there is no highest-in-order
+   value (0 already means "segment 0 arrived"), so the receiver **sends no ACK at all**
+   until one arrives — safe because the sender's timer already covers a window whose first
+   segment was lost.
 6. SR ACK semantics.
 7. Primary window size.
 8. Baseline timeout.

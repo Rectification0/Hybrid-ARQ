@@ -510,7 +510,7 @@ def test_stop_and_wait_sends_one_segment_at_a_time():
     strategy = StopAndWaitSender(state, rto=1.0)
     assert strategy.packets_to_send(0.0) == [0]
     assert strategy.packets_to_send(0.0) == [], "must not send while one is in flight"
-    strategy.on_ack(0)
+    strategy.on_ack(0, 0.05)
     assert strategy.packets_to_send(0.1) == [1]
 
 
@@ -518,8 +518,8 @@ def test_stop_and_wait_ignores_a_stale_ack():
     state = SenderTransferState(segments=[b"a", b"b"], window_size=8)
     strategy = StopAndWaitSender(state, rto=1.0)
     strategy.packets_to_send(0.0)
-    strategy.on_ack(0)
-    result = strategy.on_ack(0)          # replayed ACK for an already-acked segment
+    strategy.on_ack(0, 0.05)
+    result = strategy.on_ack(0, 0.06)    # replayed ACK for an already-acked segment
     assert result.newly_acked == [] and result.duplicate
     assert state.base == 1, "base must not move on a duplicate ACK"
 
@@ -538,7 +538,7 @@ def test_stop_and_wait_completes_only_when_every_segment_is_acked():
     assert not strategy.all_acked()
     for seq in (0, 1):
         strategy.packets_to_send(0.0)
-        strategy.on_ack(seq)
+        strategy.on_ack(seq, 0.05)
     assert strategy.all_acked()
     assert state.is_quiescent()
 

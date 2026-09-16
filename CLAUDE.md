@@ -69,7 +69,7 @@ true: the value is in the code, `specs.md` §16 records it **with its rationale*
 `design.md` §12 says **Frozen** instead of Proposed.
 
 **Frozen so far: D1** (byte layout), **D2** (checksum coverage), **D3** (`SEGMENT_SIZE`),
-**D4** (sequence convention). Everything still open carries a `# NOT FROZEN` comment in
+**D4** (sequence convention), **D5** (GBN ACK = highest in-order sequence received). Everything still open carries a `# NOT FROZEN` comment in
 `config.py` naming its decision ID and the task that freezes it.
 
 Record the rationale at freeze time, not retroactively at T10.2 — reconstructing it later
@@ -153,10 +153,14 @@ silent corruption and never presented as success (CC-01).
   next `recvfrom` as WinError 10054. There is no way to suppress it from Python
   (`SIO_UDP_CONNRESET` is not exposed and `sock.ioctl` rejects the raw code), so every
   receive loop handles it by continuing to wait. See `network/udp.py`.
-- **Phase 2 moves data with a stop-and-wait placeholder**, not a real ARQ mode.
-  `protocol/strategy.py` holds the interface from `design.md` §4; GBN (T3.2) and SR (T4.5)
-  implement the same one and drop in without changing `sender.py`. Stop-and-wait is not a
-  system under evaluation — the baselines are GBN and SR.
+- **`--mode saw` is a placeholder, not a system under evaluation.** The baselines being
+  measured are `gbn` and `sr` (`specs.md` §18). Stop-and-wait exists because Phase 2 needed
+  to move data before either real mode was written.
+- **A strategy owns its timers but never logs.** Transitions are queued via `TimerTracker`
+  and drained by the endpoint, which keeps logging on the endpoint side of the layering
+  rule while still satisfying TO-02. `next_timeout()` exists so the send loop sizes its
+  socket wait to the nearest timer — blocking a full RTO regardless would make a
+  retransmission up to two RTOs late and inflate completion times under loss.
 - **The M1 spike listener** lives at `test/spike_receiver.py`; nothing should import it.
   The real receiver is `receiver.py`.
 - **Placeholder modules are marked.** Files under `protocol/`, `network/` and `experiments/`
@@ -167,10 +171,12 @@ silent corruption and never presented as success (CC-01).
 
 ## Current state
 
-**Phases 0–2 complete (M1, M2, M3).** The packet layer is frozen, and a file transfers end
-to end at 0% loss with matching hashes and full event logs; 284 tests pass.
+**Phases 0–3 complete (M1–M4).** The packet layer is frozen, a file transfers end to end
+with matching hashes and full event logs, and Go-Back-N is implemented and tested at 0%
+loss; 324 tests pass.
 
-Next is **Phase 3 (T3.1–T3.7)**: freeze D5 (GBN ACK semantics), then the GBN sender with
-`base`/`next_seq`/window and a single oldest-packet timer, cumulative ACK processing that
-never moves `base` backward, and timeout retransmission of the full outstanding range.
-It replaces the stop-and-wait placeholder by implementing the same strategy interface.
+Next is **Phase 4 (T4.1–T4.9)**, in this order for a reason: the loss simulator
+(`network/simulator.py`) lands *first* so Selective Repeat has a loss-capable test bed from
+its first line. Then D6 (SR ACK semantics), the SR sender and receiver, and T4.8's failure
+tests against **both** baselines — which is also where GBN finally gets validated under
+real network loss rather than a hand-driven drop.

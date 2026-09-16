@@ -14,7 +14,8 @@ retry budget from config.py and fail with a message naming what timed out.
 Layering (design.md §1.1): this module owns lifecycle, file I/O, CLI and
 logging. It does not own ARQ bookkeeping — which segments may be sent, what an
 ACK advances, and what a timeout retransmits all come from the strategy
-(protocol/strategy.py). That is what lets T3.2 add GBN without editing this file.
+(protocol/strategy.py). GBN was added in T3.2 without a line changing here, which is the
+property SR (T4.5) and the hybrid (T5.4) depend on too.
 """
 
 from __future__ import annotations
@@ -32,14 +33,14 @@ from eventlog import EventLog
 from protocol import packet as pk
 from protocol.packet import Packet, PacketType
 from network.udp import open_udp_socket
-from protocol.strategy import SenderTransferState, StopAndWaitSender
+from protocol.strategy import SenderTransferState, make_sender_strategy
 
-#: Modes the CLI accepts. Only "saw" is implemented in Phase 2; the rest are
-#: named here so the error says which task delivers them rather than "invalid
-#: choice".
+#: Modes the CLI accepts, mapped to the task that delivers each. A value of None
+#: means implemented; anything else is named so the error says which task brings
+#: it rather than "invalid choice".
 MODE_TASKS = {
     "saw": None,
-    "gbn": "T3.2",
+    "gbn": None,
     "sr": "T4.5",
     "hybrid": "T5.4",
     "fixed-hybrid": "T5.6",
@@ -193,66 +194,89 @@ class Sender:
         )
 
     def _send_data(self) -> None:
-        """SENDING: drive the strategy until every segment is acknowledged."""
+        """SENDING: drive the strategy until every segment is acknowledged.
+
+        Mode-agnostic by design: this loop asks what to send, reports what
+        arrived, and asks what a timeout means. Which segments those are — one,
+        a window, or a whole outstanding range — is entirely the strategy's
+        business (design.md §1.1).
+        """
         self._transition("SENDING")
         state = SenderTransferState(segments=self.segments, window_size=self.window)
-        strategy = StopAndWaitSender(state, self.rto)
+        strategy = make_sender_strategy(self.mode, state, self.rto)
 
-        sent_once: set[int] = set()
-        sent_at: dict[int, float] = {}
-        retransmitted: set[int] = set()
-        attempts: dict[int, int] = {}
+        self._sent_once = set()
+        self._sent_at = {}
+        self._retransmitted = set()
+        self._attempts = {}
 
         while not strategy.all_acked():
-            now = time.monotonic()
+            for seq in strategy.packets_to_send(time.monotonic()):
+                self._emit_data(seq, is_retx=False)
+            self._drain_timers(strategy)
 
-            for seq in strategy.packets_to_send(now):
-                self._emit_data(seq, sent_once, sent_at, retransmitted, attempts,
-                                is_retx=False)
-
-            reply = self._receive(self.rto)
+            # Wait only as long as the nearest timer allows. Blocking for a full
+            # RTO regardless would let a timer armed mid-wait go unnoticed until
+            # the following wait ended, making a retransmission up to two RTOs
+            # late — visible as inflated completion times under loss.
+            pending = strategy.next_timeout(time.monotonic())
+            wait = self.rto if pending is None else max(0.0, min(pending, self.rto))
+            reply = self._receive(wait)
             now = time.monotonic()
 
             if reply is not None and reply.type is PacketType.ACK:
-                result = strategy.on_ack(reply.ack)
+                result = strategy.on_ack(reply.ack, now)
                 self.log.emit("ACK", sequence=reply.ack, ack=reply.ack,
                               mode=self.mode, window_size=self.window,
                               reason="DUPLICATE" if result.duplicate else None)
                 for seq in result.newly_acked:
                     # Karn's rule: a retransmitted segment's ACK is ambiguous,
                     # so it never becomes an RTT sample (design.md §5.4).
-                    if seq not in retransmitted and seq in sent_at:
-                        self.rtt_samples.append((now - sent_at[seq]) * 1000.0)
+                    if seq not in self._retransmitted and seq in self._sent_at:
+                        self.rtt_samples.append((now - self._sent_at[seq]) * 1000.0)
+                self._drain_timers(strategy)
                 continue
 
-            for seq in strategy.on_timeout(now):
-                self.log.emit("TIMEOUT", sequence=seq, mode=self.mode,
-                              window_size=self.window, reason="RTO")
-                if attempts.get(seq, 0) >= config.DATA_RETRY_LIMIT:
+            expired = strategy.on_timeout(now)
+            if not expired:
+                continue
+
+            # One timer expiry, then the range it forces. Under GBN that range
+            # is every outstanding segment, which is the cost the hybrid exists
+            # to avoid — so it is logged segment by segment (GBN-05, TO-03).
+            self.log.emit("TIMEOUT", sequence=expired[0], mode=self.mode,
+                          window_size=self.window,
+                          reason=f"RTO;outstanding={len(expired)}")
+            for seq in expired:
+                if self._attempts.get(seq, 0) >= config.DATA_RETRY_LIMIT:
                     raise TransferError(
                         f"segment {seq} unacknowledged after "
                         f"{config.DATA_RETRY_LIMIT} retransmissions — aborting"
                     )
-                self._emit_data(seq, sent_once, sent_at, retransmitted, attempts,
-                                is_retx=True)
+                self._emit_data(seq, is_retx=True)
+            self._drain_timers(strategy)
 
-    def _emit_data(self, seq: int, sent_once: set[int], sent_at: dict[int, float],
-                   retransmitted: set[int], attempts: dict[int, int],
-                   *, is_retx: bool) -> None:
+    def _drain_timers(self, strategy) -> None:
+        """Log timer transitions the strategy recorded (TO-02)."""
+        for event in strategy.drain_timer_events():
+            self.log.emit(event.kind, sequence=event.seq, mode=self.mode,
+                          window_size=self.window)
+
+    def _emit_data(self, seq: int, *, is_retx: bool) -> None:
         payload = self.segments[seq]
         size = self._send(Packet(type=PacketType.DATA, seq=seq,
                                  window=self.window, payload=payload))
-        sent_at[seq] = time.monotonic()
-        attempts[seq] = attempts.get(seq, 0) + 1
+        self._sent_at[seq] = time.monotonic()
+        self._attempts[seq] = self._attempts.get(seq, 0) + 1
 
-        if is_retx or seq in sent_once:
-            retransmitted.add(seq)
+        if is_retx or seq in self._sent_once:
+            self._retransmitted.add(seq)
             self.data_retransmitted += 1
             self.bytes_retransmitted += size
             self.log.emit("RETX", sequence=seq, mode=self.mode,
                           window_size=self.window, reason="TIMEOUT")
         else:
-            sent_once.add(seq)
+            self._sent_once.add(seq)
             self.data_sent += 1
             self.log.emit("SEND", sequence=seq, mode=self.mode,
                           window_size=self.window)
@@ -369,9 +393,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--file", required=True, type=Path, help="source file")
     parser.add_argument("--host", default=config.HOST)
     parser.add_argument("--port", type=int, default=config.PORT)
-    parser.add_argument("--mode", default="saw", choices=sorted(MODE_TASKS),
-                        help="ARQ mode (Phase 2 implements 'saw' only)")
-    parser.add_argument("--window", type=int, default=config.WINDOW_SIZE)
+    parser.add_argument("--mode", default="gbn", choices=sorted(MODE_TASKS),
+                        help="ARQ mode; 'saw' and 'gbn' are implemented")
+    parser.add_argument("--window", type=int, default=config.WINDOW_SIZE,
+                        help="outstanding segments; ignored by --mode saw")
     parser.add_argument("--run-id", default=None, help="defaults to a generated id")
     parser.add_argument("--log-dir", default=None, type=Path)
     parser.add_argument("--rto", type=float, default=None, help="override RTO seconds")
@@ -384,10 +409,13 @@ def main(argv: list[str] | None = None) -> int:
     pending_task = MODE_TASKS[args.mode]
     if pending_task:
         print(f"error: --mode {args.mode} is not implemented yet; it lands in "
-              f"{pending_task}. Phase 2 implements --mode saw.", file=sys.stderr)
+              f"{pending_task}. Implemented today: "
+              f"{', '.join(m for m, t in sorted(MODE_TASKS.items()) if t is None)}.",
+              file=sys.stderr)
         return 2
 
-    run_id = args.run_id or f"saw_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+    run_id = (args.run_id or
+              f"{args.mode}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}")
     sender = Sender(path=args.file, host=args.host, port=args.port, mode=args.mode,
                     window=args.window, run_id=run_id, log_dir=args.log_dir,
                     rto=args.rto)

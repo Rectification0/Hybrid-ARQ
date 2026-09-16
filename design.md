@@ -550,7 +550,7 @@ throughput.
 | D2 | Checksum algorithm + coverage | CRC-32 over header (checksum zeroed) + payload | **Frozen** (T1.2) |
 | D3 | Max payload / `SEGMENT_SIZE` | 1024 B | **Frozen** (T1.3) |
 | D4 | Initial sequence number | 0, segment-indexed | **Frozen** (T1.3) |
-| D5 | GBN ACK semantics | Highest in-order sequence received | Proposed |
+| D5 | GBN ACK semantics | Highest in-order sequence received; no ACK before the first | **Frozen** (T3.1) |
 | D6 | SR ACK semantics | Per-segment, ACK = sequence acknowledged | Proposed |
 | D7 | Baseline RTO | `max(4 × RTT, 200 ms)` per condition, then fixed | Proposed |
 | D8 | Loss estimator | Sliding window of 50 outcomes, retx ratio | Proposed |

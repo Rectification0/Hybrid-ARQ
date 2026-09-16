@@ -33,7 +33,7 @@ from eventlog import EventLog
 from protocol import packet as pk
 from protocol.packet import Packet, PacketType
 from network.udp import open_udp_socket
-from protocol.strategy import ReceiverTransferState, StopAndWaitReceiver
+from protocol.strategy import ReceiverTransferState, make_receiver_strategy
 
 
 class ReceiverError(Exception):
@@ -223,7 +223,9 @@ class Receiver:
         """RECEIVING: deliver in order, ACK, until FIN arrives."""
         self.state = "RECEIVING"
         transfer = ReceiverTransferState()
-        strategy = StopAndWaitReceiver(transfer)
+        # The sender's START names the mode, so both sides run the same ACK
+        # semantics without the receiver ever deciding anything (design.md §1).
+        strategy = make_receiver_strategy(self.mode, transfer)
 
         while True:
             pkt, source = self._receive(self.idle_timeout)

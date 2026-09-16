@@ -100,6 +100,37 @@ class ReceiverResult:
     buffered: bool = False              # held for later, not yet deliverable
 
 
+@dataclass(frozen=True)
+class TimerEvent:
+    """A timer starting or stopping, for the endpoint to log (TO-02)."""
+
+    kind: str                           # "TIMER_START" | "TIMER_STOP"
+    seq: int
+
+
+class TimerTracker:
+    """Records timer transitions for the endpoint to drain and log.
+
+    The strategy owns its timers — one for GBN, one per segment for SR — but
+    logging belongs to the endpoint (design.md §1.1). Rather than hand a
+    strategy a logger and blur that line, transitions are queued here and the
+    endpoint drains them after each call.
+    """
+
+    def __init__(self) -> None:
+        self._timer_events: list[TimerEvent] = []
+
+    def note_timer_start(self, seq: int) -> None:
+        self._timer_events.append(TimerEvent("TIMER_START", seq))
+
+    def note_timer_stop(self, seq: int) -> None:
+        self._timer_events.append(TimerEvent("TIMER_STOP", seq))
+
+    def drain_timer_events(self) -> list[TimerEvent]:
+        events, self._timer_events = self._timer_events, []
+        return events
+
+
 # ---------------------------------------------------------------------------
 # Interfaces
 # ---------------------------------------------------------------------------
@@ -114,13 +145,25 @@ class SenderStrategy(Protocol):
     def packets_to_send(self, now: float) -> list[int]:
         """Sequence numbers the window permits sending *now*, first time."""
 
-    def on_ack(self, ack_number: int) -> AckResult: ...
+    def on_ack(self, ack_number: int, now: float) -> AckResult: ...
 
     def on_timeout(self, now: float) -> list[int]:
         """Sequence numbers to retransmit, per this mode's rule. Empty if no
         timer has expired."""
 
+    def next_timeout(self, now: float) -> float | None:
+        """Seconds until the earliest timer expires, or None if none is armed.
+
+        The endpoint sizes its socket wait from this instead of always blocking
+        for a full RTO. Without it a timer armed part-way through a wait is not
+        noticed until the *next* wait ends, so a retransmission can be up to two
+        RTOs late — which would show up as inflated completion times in exactly
+        the loss conditions the experiments measure.
+        """
+
     def all_acked(self) -> bool: ...
+
+    def drain_timer_events(self) -> list[TimerEvent]: ...
 
 
 @runtime_checkable
@@ -137,17 +180,18 @@ class ReceiverStrategy(Protocol):
 # ---------------------------------------------------------------------------
 
 
-class StopAndWaitSender:
+class StopAndWaitSender(TimerTracker):
     """One segment in flight at a time; retransmit it when the RTO expires.
 
-    Ignores ``window_size`` by construction — a window is meaningful only once
-    GBN lands in T3.2. The CLI still accepts and records ``--window`` so runs
-    stay comparable, and ``sender.py`` says so when the value is inactive.
+    Ignores ``window_size`` by construction — a window is meaningful only from
+    GBN onward. The CLI still accepts and records ``--window`` so runs stay
+    comparable, and ``sender.py`` says so when the value is inactive.
     """
 
     name = "SAW"
 
     def __init__(self, state: SenderTransferState, rto: float):
+        super().__init__()
         self.state = state
         self.rto = rto
         self._sent_at: float | None = None      # when the current base went out
@@ -157,9 +201,10 @@ class StopAndWaitSender:
             return []
         self._sent_at = now
         self.state.next_seq = self.state.base + 1
+        self.note_timer_start(self.state.base)
         return [self.state.base]
 
-    def on_ack(self, ack_number: int) -> AckResult:
+    def on_ack(self, ack_number: int, now: float) -> AckResult:
         if self.all_acked():
             return AckResult(stale=True)
         if ack_number != self.state.base:
@@ -172,6 +217,7 @@ class StopAndWaitSender:
         self.state.base += 1
         self.state.next_seq = self.state.base
         self._sent_at = None
+        self.note_timer_stop(acked)
         return AckResult(newly_acked=[acked])
 
     def on_timeout(self, now: float) -> list[int]:
@@ -180,7 +226,14 @@ class StopAndWaitSender:
         if now - self._sent_at < self.rto:
             return []
         self._sent_at = now
+        self.note_timer_stop(self.state.base)
+        self.note_timer_start(self.state.base)
         return [self.state.base]
+
+    def next_timeout(self, now: float) -> float | None:
+        if self._sent_at is None:
+            return None
+        return max(0.0, self._sent_at + self.rto - now)
 
     def all_acked(self) -> bool:
         return self.state.base >= self.state.total_segments
@@ -207,3 +260,35 @@ class StopAndWaitReceiver:
         # A future segment. Stop-and-wait has no receive buffer, so it is
         # dropped and left to the sender's timer; SR buffers it instead (T4.6).
         return ReceiverResult()
+
+
+# ---------------------------------------------------------------------------
+# Mode selection
+# ---------------------------------------------------------------------------
+#
+# The endpoints pick a mode by name and otherwise stay mode-agnostic, which is
+# what keeps ARQ bookkeeping out of sender.py and receiver.py (design.md §1.1).
+# The imports are function-local on purpose: gbn.py and sr.py import the types
+# defined above, so a module-level import here would be circular.
+
+#: Modes that exist today. "saw" is the Phase 2 placeholder, not a system under
+#: evaluation; the baselines being measured are "gbn" and "sr" (specs.md §18).
+IMPLEMENTED_MODES = ("saw", "gbn")
+
+
+def make_sender_strategy(mode: str, state: SenderTransferState, rto: float) -> SenderStrategy:
+    if mode == "saw":
+        return StopAndWaitSender(state, rto)
+    if mode == "gbn":
+        from protocol.gbn import GbnSender
+        return GbnSender(state, rto)
+    raise ValueError(f"no sender strategy for mode {mode!r}")
+
+
+def make_receiver_strategy(mode: str, state: ReceiverTransferState) -> ReceiverStrategy:
+    if mode == "saw":
+        return StopAndWaitReceiver(state)
+    if mode == "gbn":
+        from protocol.gbn import GbnReceiver
+        return GbnReceiver(state)
+    raise ValueError(f"no receiver strategy for mode {mode!r}")

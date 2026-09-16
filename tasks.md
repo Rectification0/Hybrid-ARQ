@@ -23,15 +23,15 @@ Per the source document §37, carried forward as the current baseline:
 | Wireshark installation | ✅ Completed |
 | Wireshark packet visibility | ✅ Completed |
 | Custom packet format | ✅ Completed |
-| GBN | ⏭️ **Next** |
-| SR | ⬜ Not started |
-| Loss simulation | ⬜ Not started |
+| GBN | ✅ Completed |
+| SR | ⏭️ **Next** |
+| Loss simulation | ⏭️ **Next** |
 | Hybrid controller | ⬜ Not started |
 | Experiment automation | ⬜ Not started |
 | Analysis / graphs | ⬜ Not started |
 | Final demonstration | ⬜ Not started |
 
-Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ⏭️ current · **M5–M11** pending.
+Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5/M6** ⏭️ current · **M7–M11** pending.
 
 ---
 
@@ -114,28 +114,31 @@ GBN replaces it in T3.2 without touching `sender.py`.*
 
 ## Phase 3 — GBN (M4)
 
-- [ ] **T3.1** Freeze GBN ACK semantics and document them.
+- [x] **T3.1** Freeze GBN ACK semantics and document them.
       **Decides:** D5 · **Satisfies:** §16.5, SEQ-03, GBN-01
-- [ ] **T3.2** Implement the GBN sender: `base`, `next_seq`, window, outstanding buffer,
+- [x] **T3.2** Implement the GBN sender: `base`, `next_seq`, window, outstanding buffer,
       single oldest-packet timer.
       **Satisfies:** FR-05, FR-06, §7.1
-- [ ] **T3.3** Implement cumulative ACK processing, including refusing to move `base`
+- [x] **T3.3** Implement cumulative ACK processing, including refusing to move `base`
       backward on stale or duplicate ACKs.
       **Satisfies:** GBN-02, GBN-03
-- [ ] **T3.4** Implement GBN timeout retransmission of the full outstanding range, with
+- [x] **T3.4** Implement GBN timeout retransmission of the full outstanding range, with
       `RETX` logging carrying sequence, mode, and reason.
       **Satisfies:** GBN-04, GBN-05, TO-02, TO-03, TO-05
-- [ ] **T3.5** Implement the GBN receiver (single `expected_seq`, no buffering, re-ACK on
+- [x] **T3.5** Implement the GBN receiver (single `expected_seq`, no buffering, re-ACK on
       out-of-order).
       **Satisfies:** §7, FR-10
-- [ ] **T3.6** Unit tests: cumulative ACK processing; base non-regression; timeout
+- [x] **T3.6** Unit tests: cumulative ACK processing; base non-regression; timeout
       retransmission of the correct range.
       **Satisfies:** §25.1
-- [ ] **T3.7** Integration test: GBN at 0% loss, hash match.
+- [x] **T3.7** Integration test: GBN at 0% loss, hash match.
       **Satisfies:** §25.2
 
 **M4 complete when:** GBN retransmission tests pass. *(Controlled-loss GBN validation is
 T4.6 — it needs the simulator.)*
+*Done — D5 frozen, GBN implemented behind the shared strategy interface, 1 MiB over
+loopback with 8 segments in flight and a matching hash. Loss recovery is verified by
+driving a drop directly against the strategy; the networked version is T4.8.*
 
 ## Phase 4 — Impairment and SR (M5, M6)
 
