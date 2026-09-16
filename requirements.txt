@@ -1,0 +1,6 @@
+# Runtime protocol code uses only the Python 3 standard library
+# (socket, struct, dataclasses, hashlib, logging, csv, zlib).
+# These are needed for the experiment analysis and graphs only (design.md §2.2).
+pandas>=2.0
+matplotlib>=3.7
+pytest>=7.0
