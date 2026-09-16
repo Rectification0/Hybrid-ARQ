@@ -102,11 +102,13 @@ RECEIVER_LINGER_S = 2.0             # keep re-ACKing a repeated FIN after FIN_AC
 # Hybrid controller (specs.md §10, §16.9-§16.11 — decisions D8, D9)
 # ---------------------------------------------------------------------------
 
-# Loss estimator (D8): fraction of the last LOSS_WINDOW_SIZE DATA transmission
-# outcomes that required a retransmission. Bounded in [0, 1], so thresholds read
-# directly as loss rates. Known GBN bias must be documented before freezing
-# (T5.2) — once frozen, changing it means re-running every experiment.
-LOSS_WINDOW_SIZE = 50       # NOT FROZEN — D8, frozen by T5.2
+# Loss estimator (D8): the fraction of the last LOSS_WINDOW_SIZE *segment
+# outcomes* that required a retransmission, each outcome recorded when its
+# segment is acknowledged. Bounded in [0, 1], so thresholds read directly as
+# loss rates. See protocol/hybrid.py for the formula, the rationale and the
+# known GBN bias; specs.md §16.9 records it. Changing this value changes every
+# switching decision and invalidates every experiment already run.
+LOSS_WINDOW_SIZE = 50       # FROZEN — D8 (T5.2)
 
 # Dual thresholds with a dead band: SWITCH_LOW < SWITCH_HIGH. Both sit inside
 # the loss grid of §17.1, so the experimental matrix contains conditions on
@@ -123,7 +125,11 @@ HYSTERESIS_COUNT = 3        # NOT FROZEN — D9, frozen by T7.2
 EVALUATION_INTERVAL_SEGMENTS = 20   # NOT FROZEN — D9, frozen by T7.2
 MIN_MODE_RESIDENCE_S = 1.0          # NOT FROZEN — D9, frozen by T7.2
 
-DEFAULT_MODE = "GBN"        # starting mode for a hybrid transfer
+# Starting mode for a hybrid transfer. Both endpoints read this same value, so
+# the receiver builds the right strategy from a START that names only "hybrid" —
+# the starting mode needs no field on the wire and the two sides cannot disagree
+# about where the transfer began (T5.4).
+DEFAULT_MODE = "GBN"
 
 # ---------------------------------------------------------------------------
 # Per-experiment values (specs.md §15, §17, §19)

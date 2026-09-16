@@ -371,10 +371,48 @@ recorded in this section, and marked Frozen in `design.md` §12.
    *within* each cell, which is what fairness actually requires (§11). No adaptive RTO:
    RTT samples are measured for analysis only (Karn's rule) and never fed back, so the
    comparison isolates retransmission strategy rather than timer tuning (§3).
-9. Loss-estimation formula.
+9. ✅ **FROZEN (T5.2, D8)** — Loss-estimation formula: a sliding window over the last
+   `LOSS_WINDOW_SIZE = 50` **segment outcomes**, where an outcome is recorded when a
+   segment is acknowledged and is 1 if that segment ever required retransmission and 0 if
+   it did not; `loss_estimate = retransmitted_segments_in_window / segments_in_window`.
+   Implemented as `protocol.hybrid.LossEstimator`. Rationale: observable on the sender
+   alone with no extra packets; computed identically under both modes, so a threshold
+   means the same thing either side of a switch; bounded in [0, 1], so `SWITCH_HIGH` and
+   `SWITCH_LOW` read directly as loss rates and sit inside the loss grid of §17.1. The
+   EWMA alternative reacts more smoothly but adds a second tunable that interacts with the
+   hysteresis count and makes E8 harder to explain. The outcome is recorded at
+   acknowledgement rather than per transmission so a segment sent four times remains one
+   observation — counting transmissions would push the ratio above the loss rate on its
+   own. The window is not cleared at a switch: the new mode inherits the evidence that
+   justified entering it, which with the minimum residence time is what stops a switch
+   being re-evaluated immediately against a nearly empty window.
+   **Known bias, to be reported (T10.4, H-05):** under GBN one lost segment forces the
+   whole outstanding range to be resent, so every segment behind the loss also records an
+   outcome of 1. The estimator therefore over-reads loss while GBN is active, by roughly
+   the window occupancy, relative to the same physical loss observed under SR. It biases
+   the controller toward *entering* SR — the direction that fails safe — but it means
+   `SWITCH_HIGH` is not a physical loss percentage, and `SWITCH_LOW` is evaluated on a
+   different scale from `SWITCH_HIGH`. Calibration (T7.1) works against the estimator as
+   defined here, not against the nominal loss rate.
 10. Switching threshold(s).
 11. Hysteresis rule.
-12. Safe mode-transition mechanism.
+12. ✅ **FROZEN (T5.4, D10)** — Safe mode-transition mechanism: an explicit **MODE
+    handshake at a quiescent window**. The sender stops introducing new segments while
+    continuing to service timers under the current mode; at `send_base == next_seq` it
+    sends `MODE {mode, effective_from_seq, epoch}` and waits for the receiver's echo,
+    retransmitting within the control retry budget. On echo, both sides rebuild their
+    strategy around the unchanged transfer state and resume from `effective_from_seq`. A
+    handshake that exhausts the budget is **abandoned** and the transfer continues in the
+    current mode — a logged non-event, never a half-switched transfer (§13). The receiver
+    refuses, by not echoing, any request that names an unknown mode or arrives when its own
+    position disagrees with `effective_from_seq`; an echo or request whose epoch is not
+    current is discarded (HY-07). Rationale: GBN and SR disagree about what an ACK *means*
+    (D5 vs D6), so draining first is what makes "no in-flight packet is ever read under the
+    wrong convention" true by construction rather than by argument. Segment payloads live
+    in the mode-independent transfer state, not inside the strategy object, so no
+    unacknowledged segment can be lost in the rebuild (HY-05). Cost, stated because it is
+    real: each switch stalls the pipe for roughly one RTT, which is exactly what the
+    `fixed-hybrid` control measures.
 13. Experiment repetition count.
 14. Random-loss seed policy.
 15. File size(s).

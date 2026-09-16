@@ -26,12 +26,12 @@ Per the source document §37, carried forward as the current baseline:
 | GBN | ✅ Completed |
 | SR | ✅ Completed |
 | Loss simulation | ✅ Completed |
-| Hybrid controller | ⏭️ **Next** |
-| Experiment automation | ⬜ Not started |
+| Hybrid controller | ✅ Completed |
+| Experiment automation | ⏭️ **Next** |
 | Analysis / graphs | ⬜ Not started |
 | Final demonstration | ⬜ Not started |
 
-Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ⏭️ current · **M8–M11** pending.
+Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ✅ · **M8** ⏭️ current · **M9–M11** pending.
 
 ---
 
@@ -182,35 +182,45 @@ assumed. A recorded seed replays a transfer to the same retransmission count.*
 
 **Do not start until T3.7 and T4.8 pass for both baselines.**
 
-- [ ] **T5.1** Implement the statistics collector for every item in `specs.md` §10
+- [x] **T5.1** Implement the statistics collector for every item in `specs.md` §10
       (transmissions, unique DATA, ACKed, retransmissions, loss indicator, mode, switch
       count, residence times, RTT samples).
       **Satisfies:** G-04, §10, HY-01
-- [ ] **T5.2** Implement and **freeze** the loss estimator.
+- [x] **T5.2** Implement and **freeze** the loss estimator.
       **Decides:** D8 · **Satisfies:** §10, §16.9 · **Done when:** the formula and its known
       GBN bias are documented, and no later change is made without re-running all experiments.
-- [ ] **T5.3** Implement the threshold decision rule with dual thresholds, the
+- [x] **T5.3** Implement the threshold decision rule with dual thresholds, the
       consecutive-confirmation counter, and a minimum residence time.
       **Satisfies:** FR-08, HY-02, HY-03, HY-09
-- [ ] **T5.4** Implement the MODE handshake transition: quiesce the window, exchange MODE
+- [x] **T5.4** Implement the MODE handshake transition: quiesce the window, exchange MODE
       with epoch and `effective_from_seq`, rebuild strategies from exported transfer state,
       abandon safely on handshake failure.
       **Decides:** D10, D12(mechanism) · **Satisfies:** §16.12, HY-04 … HY-08, §13 (mode inconsistency)
       **Done when:** a switch mid-transfer preserves every unacked segment and the final hash matches.
-- [ ] **T5.5** Log `SWITCH` events with timestamp, old/new mode, loss estimate, reason, epoch.
+- [x] **T5.5** Log `SWITCH` events with timestamp, old/new mode, loss estimate, reason, epoch.
       **Satisfies:** FR-09, HY-08
-- [ ] **T5.6** Add `--mode fixed-hybrid` (controller and MODE machinery active, switching
+- [x] **T5.6** Add `--mode fixed-hybrid` (controller and MODE machinery active, switching
       disabled) as the switching-overhead control.
       **Satisfies:** §18
-- [ ] **T5.7** Unit tests: threshold evaluation at, just below, and just above each
+- [x] **T5.7** Unit tests: threshold evaluation at, just below, and just above each
       threshold; hysteresis suppresses a single-observation spike; a stale MODE echo is
       discarded; a failed handshake leaves the transfer in a valid single mode.
       **Satisfies:** §25.1
-- [ ] **T5.8** Integration tests: transfer through GBN→SR; transfer through SR→GBN; hash
+- [x] **T5.8** Integration tests: transfer through GBN→SR; transfer through SR→GBN; hash
       matches in both; a transfer held near the threshold does not oscillate.
       **Satisfies:** §25.2, §25.3, CC-04
 
 **M7 complete when:** runtime switching works with no corruption across repeated switches.
+*Done — D8 frozen (the estimator, with its GBN bias recorded at freeze time rather than
+reconstructed later) and D10 frozen (the MODE handshake at a quiescent window). The
+controller decides and the endpoints negotiate; neither reaches into the other. A switch
+mid-transfer preserves every unacknowledged segment by construction — payloads live in the
+transfer state, not in the strategy — and both directions of switch finish with a matching
+hash under loss. A handshake that cannot be negotiated is abandoned and the transfer
+completes in its existing mode; a stale epoch is discarded rather than replayed. 446 tests
+pass. **D9 is deliberately still open**: Phase 7 calibrates the thresholds against real
+data, and the Phase 5 tests pin the rule rather than the numbers so calibration does not
+have to rewrite them.*
 
 ## Phase 6 — Logging completeness (M8)
 

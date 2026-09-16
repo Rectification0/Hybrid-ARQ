@@ -71,16 +71,19 @@ true: the value is in the code, `specs.md` §16 records it **with its rationale*
 **Frozen so far: D1** (byte layout), **D2** (checksum coverage), **D3** (`SEGMENT_SIZE`),
 **D4** (sequence convention), **D5** (GBN ACK = highest in-order received), **D6** (SR ACK
 = exactly the segment named), **D7** (RTO = max(4xRTT, 200 ms) per condition),
-**D11** (window 8). Everything still open carries a `# NOT FROZEN` comment in
-`config.py` naming its decision ID and the task that freezes it.
+**D8** (loss estimator: 50 segment outcomes, recorded at ACK), **D10** (MODE handshake at a
+quiescent window), **D11** (window 8). Everything still open carries a `# NOT FROZEN`
+comment in `config.py` naming its decision ID and the task that freezes it.
 
 Record the rationale at freeze time, not retroactively at T10.2 — reconstructing it later
 from memory is how a frozen value becomes an unexplained one.
 
 Two freezes are experiment-invalidating and must not be touched casually once set:
-**D8** (loss estimator) and **D9** (switching thresholds). Changing either after the sweep
-means re-running every experiment. They are deliberately left open until Phase 7 calibrates
-them against real data.
+**D8** (loss estimator, frozen at T5.2) and **D9** (switching thresholds, still open).
+Changing either after the sweep means re-running every experiment. D9 is deliberately left
+open until Phase 7 calibrates it against real data — which is also why the Phase 5 tests
+supply their own thresholds rather than reading the config defaults: they pin the rule, not
+the numbers, so calibration does not have to rewrite them.
 
 The wire format is likewise load-bearing: changing MAGIC, the struct layout or the
 `PacketType` numbering invalidates every capture and log already recorded.
@@ -182,13 +185,18 @@ silent corruption and never presented as success (CC-01).
 
 ## Current state
 
-**Phases 0–4 complete (M1–M6).** Both ARQ baselines are implemented and pass the T4.8
-failure suite under simulated loss, delay and corruption; 397 tests pass. At 10% loss over
-1 MiB with the same seed, GBN resent 883 segments against SR's 167.
+**Phases 0–5 complete (M1–M7).** Both ARQ baselines pass the T4.8 failure suite under
+simulated loss, delay and corruption, and the hybrid controller switches between them at
+runtime; 446 tests pass. At 10% loss over 1 MiB with the same seed, GBN resent 883 segments
+against SR's 167.
 
-**Phase 5 (T5.1–T5.8) is now unblocked** — the ordering rule from source spec §41 required
-both baselines correct first, and T3.7 and T4.8 both pass. It is the correctness-critical
-phase: the statistics collector, D8 (the loss estimator, experiment-invalidating once
-frozen), the dual-threshold rule with hysteresis, and the MODE handshake at a quiescent
-window. Note that D9 (thresholds) is deliberately *not* frozen in Phase 5 — Phase 7
-calibrates it against real data.
+The controller lives in `protocol/hybrid.py` and only ever *decides*: the MODE handshake
+itself is endpoint lifecycle, in `sender.py` / `receiver.py`. `SWITCH` means the mode
+changed; the `MODE` event (added in T5.4) means the handshake did something — including
+being refused, repeated or abandoned. A `SWITCH` row whose reason is `FIXED_HYBRID_NOOP` is
+the `--mode fixed-hybrid` control paying the drain cost without changing semantics, so a
+count of real transitions excludes those rows.
+
+**Phase 6 (T6.1–T6.3) is next**: audit the event vocabulary against the code, confirm every
+specs.md §20 metric is computable from `events.csv` alone, and record the full frozen
+config, seed and commit in `summary.json`.

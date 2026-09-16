@@ -30,6 +30,7 @@ from pathlib import Path
 
 import config
 from eventlog import EventLog
+from protocol import hybrid
 from protocol import packet as pk
 from protocol.packet import Packet, PacketType
 from network.simulator import Impairment
@@ -123,10 +124,16 @@ class Receiver:
         self.log: EventLog | None = None
         self.writer: OutputWriter | None = None
         self.start_info: pk.StartPayload | None = None
+        # ``requested_mode`` is what the sender's START named — possibly a
+        # controller ("hybrid"); ``mode`` is the ARQ mode actually live, which is
+        # what builds the strategy and what every event logs.
+        self.requested_mode = "saw"
         self.mode = "saw"
         self.window_size = 1
         self.duplicates = 0
         self.integrity_success = False
+        self.mode_epoch = 0
+        self.switch_count = 0
 
     # -- setup -------------------------------------------------------------
 
@@ -201,7 +208,12 @@ class Receiver:
             info = pk.StartPayload.from_payload(pkt.payload)
             self.run_id = info.run_id or self.run_id
             self.log = EventLog(self.run_id, "receiver", log_dir=self.log_dir)
-            self.mode = info.mode
+            self.requested_mode = info.mode
+            # A hybrid transfer starts in config.DEFAULT_MODE. Both endpoints
+            # read the same config, so the starting mode needs no field on the
+            # wire and the two sides cannot disagree about where it began.
+            self.mode = (hybrid.initial_mode()
+                         if info.mode in hybrid.HYBRID_MODES else info.mode)
             self.window_size = max(1, pkt.window)
             self._log("START", window_size=pkt.window,
                       reason=f"{info.filename} {info.filesize}B")
@@ -277,8 +289,99 @@ class Receiver:
                 self._log("START", reason="DUPLICATE")
                 self._ack_start(address)
 
+            elif pkt.type is PacketType.MODE:
+                strategy = self._handle_mode(pkt, strategy, transfer, address)
+
             elif pkt.type is PacketType.FIN:
                 return pkt, address
+
+    def _handle_mode(self, pkt: Packet, strategy, transfer: ReceiverTransferState,
+                     address):
+        """The receiving half of the MODE handshake (T5.4, D10, HY-04).
+
+        Returns the strategy to carry on with. The receiver never *decides* a
+        switch — it validates one, adopts it, and echoes. Not echoing is how it
+        refuses: the sender runs out of retries and continues in the current
+        mode, which leaves both sides in one consistent mode rather than half
+        switched (specs.md §13, design.md §6.3).
+        """
+        request = pk.ModePayload.from_payload(pkt.payload)
+
+        if request.epoch < self.mode_epoch:
+            # A MODE from a superseded handshake, arriving late. Discarding it is
+            # exactly what the epoch counter exists for (HY-07).
+            self._log("MODE", sequence=request.effective_from_seq,
+                      reason=f"STALE;epoch={request.epoch}<{self.mode_epoch}")
+            return strategy
+
+        if request.epoch == self.mode_epoch and self.mode_epoch > 0:
+            # The switch already happened and the echo was lost. Answer again,
+            # idempotently: re-running the switch would be wrong, staying silent
+            # would strand a sender that has already drained its window.
+            if request.mode != self.mode:
+                self._log("MODE", sequence=request.effective_from_seq,
+                          reason=f"REFUSED;epoch {request.epoch} reused for "
+                                 f"{request.mode} while in {self.mode}")
+                return strategy
+            self._echo_mode(request, address, "REPEAT")
+            return strategy
+
+        refusal = self._mode_refusal(request, strategy, transfer)
+        if refusal is not None:
+            self._log("MODE", sequence=request.effective_from_seq,
+                      reason=f"REFUSED;{refusal}")
+            return strategy
+
+        previous = self.mode
+        self.mode = request.mode
+        self.mode_epoch = request.epoch
+        if request.mode != previous:
+            self.switch_count += 1
+        # Rebuilt around the *same* transfer state, so ``expected_seq`` and
+        # everything already written carry across untouched (HY-06, HY-07).
+        rebuilt = make_receiver_strategy(self.mode, transfer, self.window_size)
+        self._log("SWITCH", sequence=request.effective_from_seq,
+                  window_size=self.window_size,
+                  reason=f"{request.reason or 'MODE_REQUEST'};from={previous};"
+                         f"epoch={request.epoch}")
+        self._echo_mode(request, address, "ACCEPTED")
+        return rebuilt
+
+    def _mode_refusal(self, request: pk.ModePayload, strategy,
+                      transfer: ReceiverTransferState) -> str | None:
+        """Why this MODE request cannot be honoured, or None if it can.
+
+        The quiescence check is not defensive padding: the sender only sends
+        MODE once every segment it has sent is acknowledged, so the receiver
+        must already have delivered exactly up to ``effective_from_seq`` with an
+        empty buffer. If it has not, the two sides disagree about the transfer's
+        position, and switching ACK semantics on top of that disagreement is the
+        one thing guaranteed to corrupt the file.
+        """
+        if request.mode not in hybrid.ARQ_MODES:
+            return f"unknown mode {request.mode!r}"
+        if transfer.expected_seq != request.effective_from_seq:
+            return (f"not quiescent: expected_seq={transfer.expected_seq}, "
+                    f"effective_from_seq={request.effective_from_seq}")
+        buffered = getattr(strategy, "buffer", None)
+        if buffered:
+            return f"receive buffer holds {sorted(buffered)}"
+        return None
+
+    def _echo_mode(self, request: pk.ModePayload, address, disposition: str) -> None:
+        """Echo the request back verbatim; the epoch is what the sender matches on."""
+        self._send(Packet(
+            type=PacketType.MODE,
+            seq=request.effective_from_seq,
+            payload=pk.ModePayload(
+                mode=request.mode,
+                effective_from_seq=request.effective_from_seq,
+                epoch=request.epoch,
+                reason="ECHO",
+            ).to_payload(),
+        ), address)
+        self._log("MODE", sequence=request.effective_from_seq,
+                  reason=f"{disposition};echo;epoch={request.epoch}")
 
     def _finalize(self, fin: Packet, address) -> pk.FinAckPayload:
         """FINALIZING: hash the output, compare, reply FIN_ACK."""
@@ -361,6 +464,10 @@ class Receiver:
             "goodput_bytes_per_s": written / elapsed if elapsed > 0 else 0.0,
             "duplicates_suppressed": self.duplicates,
             "integrity_success": self.integrity_success,
+            "requested_mode": self.requested_mode,
+            "final_mode": self.mode,
+            "switch_count": self.switch_count,
+            "mode_epoch": self.mode_epoch,
             "error": error,
         }
 

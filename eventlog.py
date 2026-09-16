@@ -45,10 +45,15 @@ EVENT_COLUMNS = [
 
 #: design.md §9. Emitting a name outside this set raises, so a typo cannot
 #: silently produce an event that the T6.1 audit would never find.
+#:
+#: ``MODE`` was added in T5.4: every other control packet type already had an
+#: event of its own, and the MODE *exchange* has to stay distinguishable from
+#: the ``SWITCH`` it may or may not produce — a handshake that is refused,
+#: repeated or abandoned is exactly the case a reader needs to see.
 EVENT_NAMES = frozenset({
     "SEND", "RETX", "ACK", "TIMEOUT", "TIMER_START", "TIMER_STOP", "SWITCH",
     "DROP", "CHECKSUM_FAIL", "MALFORMED", "DUPLICATE", "DELIVER", "LOSS_CHANGE",
-    "START", "START_ACK", "FIN", "FIN_ACK", "ERROR",
+    "START", "START_ACK", "FIN", "FIN_ACK", "MODE", "ERROR",
 })
 
 ENDPOINTS = frozenset({"sender", "receiver"})

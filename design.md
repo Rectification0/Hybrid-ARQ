@@ -496,11 +496,19 @@ which is what lets the two logs be concatenated and interleaved during analysis.
 
 Event vocabulary: `SEND`, `RETX`, `ACK`, `TIMEOUT`, `TIMER_START`, `TIMER_STOP`, `SWITCH`,
 `DROP`, `CHECKSUM_FAIL`, `MALFORMED`, `DUPLICATE`, `DELIVER`, `LOSS_CHANGE`, `START`,
-`START_ACK`, `FIN`, `FIN_ACK`, `ERROR`.
+`START_ACK`, `FIN`, `FIN_ACK`, `MODE`, `ERROR`.
 
 `LOSS_CHANGE` was added in T4.2: a dynamic-loss run (E8) is only interpretable if the
 moment the condition changed is recorded alongside the protocol's reaction to it, and no
 other event in the vocabulary carries that.
+
+`MODE` was added in T5.4. Every other control packet type already had an event of its own,
+and the MODE *exchange* has to stay distinguishable from the `SWITCH` it may or may not
+produce: a handshake that is refused, repeated or abandoned is exactly the case a reader
+needs to see, and it is not a transition. `SWITCH` therefore means "the mode changed",
+`MODE` means "the handshake did something". A `SWITCH` row whose reason is
+`FIXED_HYBRID_NOOP` is the `--mode fixed-hybrid` control paying the drain without changing
+semantics; a count of real transitions is the count of `SWITCH` rows excluding those.
 
 Design rules:
 
@@ -557,9 +565,9 @@ throughput.
 | D5 | GBN ACK semantics | Highest in-order sequence received; no ACK before the first | **Frozen** (T3.1) |
 | D6 | SR ACK semantics | Per-segment, ACK = sequence acknowledged | **Frozen** (T4.4) |
 | D7 | Baseline RTO | `max(4 × RTT, 200 ms)` per condition, then fixed | **Frozen** (T4.9) |
-| D8 | Loss estimator | Sliding window of 50 outcomes, retx ratio | Proposed |
+| D8 | Loss estimator | Sliding window of 50 segment outcomes, retx ratio, recorded at ACK | **Frozen** (T5.2) |
 | D9 | Thresholds / hysteresis | HIGH 0.05, LOW 0.02, count 3 | Needs calibration (T4) |
-| D10 | Transition mechanism | MODE handshake at quiescent window | Proposed |
+| D10 | Transition mechanism | MODE handshake at a quiescent window, epoch-guarded, abandoned on retry exhaustion | **Frozen** (T5.4) |
 | D11 | Primary window size | 8 (source spec default) | **Frozen** (T4.9) |
 | D12 | Repetition count | 5 trials per cell | Proposed |
 | D13 | Seed policy | Recorded base seed, derived per trial | Proposed |

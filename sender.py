@@ -30,6 +30,7 @@ from pathlib import Path
 
 import config
 from eventlog import EventLog
+from protocol import hybrid
 from protocol import packet as pk
 from protocol.packet import Packet, PacketType
 from network.simulator import Impairment
@@ -43,8 +44,8 @@ MODE_TASKS = {
     "saw": None,
     "gbn": None,
     "sr": None,
-    "hybrid": "T5.4",
-    "fixed-hybrid": "T5.6",
+    "hybrid": None,
+    "fixed-hybrid": None,
 }
 
 
@@ -79,7 +80,8 @@ class Sender:
     def __init__(self, *, path: Path, host: str, port: int, mode: str,
                  window: int, run_id: str, log_dir=None,
                  rto: float | None = None, sock: socket.socket | None = None,
-                 impairment: Impairment | None = None):
+                 impairment: Impairment | None = None,
+                 hybrid_settings: hybrid.HybridSettings | None = None):
         self.path = Path(path)
         self.host = host
         self.port = port
@@ -87,6 +89,16 @@ class Sender:
         self.window = window
         self.run_id = run_id
         self.rto = config.RTO_S if rto is None else rto
+
+        # ``mode`` is what the CLI asked for and what travels in START; it may
+        # name a controller ("hybrid") rather than a strategy. ``active_mode`` is
+        # the ARQ mode actually live on the wire, and is what every event logs —
+        # a SWITCH is only readable if the rows around it name real modes.
+        self.hybrid_settings = hybrid_settings
+        self.controller: hybrid.HybridController | None = None
+        self.active_mode = (hybrid.initial_mode() if mode in hybrid.HYBRID_MODES
+                            else mode)
+        self._pending_switch: hybrid.SwitchDecision | None = None
 
         self.log = EventLog(run_id, "sender", log_dir=log_dir)
         self._owns_socket = sock is None
@@ -146,9 +158,9 @@ class Sender:
             try:
                 return pk.decode(raw)
             except pk.ChecksumError as exc:
-                self.log.emit("CHECKSUM_FAIL", mode=self.mode, reason=str(exc))
+                self.log.emit("CHECKSUM_FAIL", mode=self.active_mode, reason=str(exc))
             except pk.PacketError as exc:
-                self.log.emit("MALFORMED", mode=self.mode,
+                self.log.emit("MALFORMED", mode=self.active_mode,
                               reason=f"{type(exc).__name__}: {exc}")
 
     def _on_impairment(self, kind: str, direction: str, raw, **detail) -> None:
@@ -169,7 +181,7 @@ class Sender:
                 reason = f"{direction};{decoded.type.name}"
             except pk.PacketError:
                 reason = f"{direction};undecodable"
-        self.log.emit(kind, sequence=sequence, mode=self.mode,
+        self.log.emit(kind, sequence=sequence, mode=self.active_mode,
                       window_size=self.window, reason=reason)
 
     def _transition(self, new_state: str) -> None:
@@ -192,11 +204,11 @@ class Sender:
 
         for attempt in range(1, config.CONTROL_RETRY_LIMIT + 1):
             self._send(start)
-            self.log.emit("START", mode=self.mode, window_size=self.window,
+            self.log.emit("START", mode=self.active_mode, window_size=self.window,
                           reason=f"attempt {attempt}")
             reply = self._receive(config.CONTROL_RETRY_TIMEOUT_S)
             if reply is None:
-                self.log.emit("TIMEOUT", mode=self.mode, reason="START_ACK")
+                self.log.emit("TIMEOUT", mode=self.active_mode, reason="START_ACK")
                 continue
             if reply.type is not PacketType.START_ACK:
                 continue
@@ -209,7 +221,7 @@ class Sender:
                     f"segment size mismatch: sender {config.SEGMENT_SIZE}, "
                     f"receiver {ack_payload.segment_size}"
                 )
-            self.log.emit("START_ACK", mode=self.mode, window_size=self.window)
+            self.log.emit("START_ACK", mode=self.active_mode, window_size=self.window)
             return
 
         raise TransferError(
@@ -227,7 +239,12 @@ class Sender:
         """
         self._transition("SENDING")
         state = SenderTransferState(segments=self.segments, window_size=self.window)
-        strategy = make_sender_strategy(self.mode, state, self.rto)
+
+        # A hybrid transfer runs a real ARQ strategy at every instant; the
+        # controller only decides *which* one, and never sits in the data path.
+        self.controller = hybrid.make_controller(
+            self.mode, time.monotonic(), self.hybrid_settings)
+        strategy = make_sender_strategy(self.active_mode, state, self.rto)
 
         self._sent_once = set()
         self._sent_at = {}
@@ -235,8 +252,18 @@ class Sender:
         self._attempts = {}
 
         while not strategy.all_acked():
-            for seq in strategy.packets_to_send(time.monotonic()):
-                self._emit_data(seq, is_retx=False)
+            if self._pending_switch is None:
+                for seq in strategy.packets_to_send(time.monotonic()):
+                    self._emit_data(seq, is_retx=False)
+            elif state.is_quiescent():
+                # The window has drained: no packet's fate now depends on which
+                # ACK semantics are live, which is the only safe moment to swap
+                # them (design.md §6.3).
+                strategy = self._switch_mode(strategy, state)
+                continue
+            # While a switch is pending, no *new* segment enters the window, but
+            # timers keep being serviced under the current mode — the drain has
+            # to make progress even if the last outstanding segments are lost.
             self._drain_timers(strategy)
 
             # Wait only as long as the nearest timer allows. Blocking for a full
@@ -248,17 +275,35 @@ class Sender:
             reply = self._receive(wait)
             now = time.monotonic()
 
+            if reply is not None and reply.type is PacketType.MODE:
+                # An echo from a handshake that has already been committed or
+                # abandoned. Discarding it is what stops a late echo from
+                # reactivating a superseded switch (HY-07).
+                self.log.emit("MODE", mode=self.active_mode, reason="STALE_ECHO")
+                continue
+
             if reply is not None and reply.type is PacketType.ACK:
                 result = strategy.on_ack(reply.ack, now)
                 self.log.emit("ACK", sequence=reply.ack, ack=reply.ack,
-                              mode=self.mode, window_size=self.window,
+                              mode=self.active_mode, window_size=self.window,
+                              loss_estimate=(self.controller.loss_estimate
+                                             if self.controller else None),
                               reason="DUPLICATE" if result.duplicate else None)
                 for seq in result.newly_acked:
                     # Karn's rule: a retransmitted segment's ACK is ambiguous,
                     # so it never becomes an RTT sample (design.md §5.4).
-                    if seq not in self._retransmitted and seq in self._sent_at:
-                        self.rtt_samples.append((now - self._sent_at[seq]) * 1000.0)
+                    retransmitted = seq in self._retransmitted
+                    if not retransmitted and seq in self._sent_at:
+                        sample = (now - self._sent_at[seq]) * 1000.0
+                        self.rtt_samples.append(sample)
+                        if self.controller:
+                            self.controller.on_rtt_sample(sample)
+                    if self.controller:
+                        self.controller.on_segment_acked(
+                            seq, retransmitted=retransmitted, now=now)
                 self._drain_timers(strategy)
+                if self.controller and self._pending_switch is None:
+                    self._pending_switch = self.controller.evaluate(now)
                 continue
 
             expired = strategy.on_timeout(now)
@@ -268,7 +313,7 @@ class Sender:
             # One timer expiry, then the range it forces. Under GBN that range
             # is every outstanding segment, which is the cost the hybrid exists
             # to avoid — so it is logged segment by segment (GBN-05, TO-03).
-            self.log.emit("TIMEOUT", sequence=expired[0], mode=self.mode,
+            self.log.emit("TIMEOUT", sequence=expired[0], mode=self.active_mode,
                           window_size=self.window,
                           reason=f"RTO;outstanding={len(expired)}")
             for seq in expired:
@@ -283,7 +328,7 @@ class Sender:
     def _drain_timers(self, strategy) -> None:
         """Log timer transitions the strategy recorded (TO-02)."""
         for event in strategy.drain_timer_events():
-            self.log.emit(event.kind, sequence=event.seq, mode=self.mode,
+            self.log.emit(event.kind, sequence=event.seq, mode=self.active_mode,
                           window_size=self.window)
 
     def _emit_data(self, seq: int, *, is_retx: bool) -> None:
@@ -293,18 +338,113 @@ class Sender:
         self._sent_at[seq] = time.monotonic()
         self._attempts[seq] = self._attempts.get(seq, 0) + 1
 
-        if is_retx or seq in self._sent_once:
+        retransmission = is_retx or seq in self._sent_once
+        if retransmission:
             self._retransmitted.add(seq)
             self.data_retransmitted += 1
             self.bytes_retransmitted += size
-            self.log.emit("RETX", sequence=seq, mode=self.mode,
+            self.log.emit("RETX", sequence=seq, mode=self.active_mode,
                           window_size=self.window, reason="TIMEOUT")
         else:
             self._sent_once.add(seq)
             self.data_sent += 1
-            self.log.emit("SEND", sequence=seq, mode=self.mode,
+            self.log.emit("SEND", sequence=seq, mode=self.active_mode,
                           window_size=self.window)
         self.bytes_sent += size
+        if self.controller:
+            self.controller.on_transmission(seq, retransmitted=retransmission)
+
+    # -- mode switching (T5.4) ---------------------------------------------
+
+    def _switch_mode(self, strategy, state: SenderTransferState):
+        """Run the MODE handshake at a quiescent boundary (D10, design.md §6.3).
+
+        Called only with ``state.is_quiescent()`` true, so every segment sent so
+        far is acknowledged and nothing is in flight to be misread under the
+        other mode's ACK convention. Returns the strategy to carry on with —
+        the new one on success, the unchanged one if the handshake is abandoned.
+
+        Under ``--mode fixed-hybrid`` the handshake still runs, but names the
+        mode already in force: the control pays the drain and the exchange
+        without changing semantics (T5.6).
+        """
+        decision = self._pending_switch
+        self._pending_switch = None
+        epoch = self.controller.begin_switch()
+        target = (decision.target_mode if self.controller.switching_enabled
+                  else self.active_mode)
+        boundary = state.next_seq
+
+        payload = pk.ModePayload(
+            mode=target, effective_from_seq=boundary, epoch=epoch,
+            reason=decision.reason,
+        ).to_payload()
+        mode_packet = Packet(type=PacketType.MODE, seq=boundary,
+                             window=self.window, payload=payload)
+
+        for attempt in range(1, config.CONTROL_RETRY_LIMIT + 1):
+            self._send(mode_packet)
+            self.log.emit("MODE", sequence=boundary, mode=self.active_mode,
+                          window_size=self.window,
+                          loss_estimate=decision.loss_estimate,
+                          reason=f"REQUEST;target={target};epoch={epoch};"
+                                 f"attempt {attempt}")
+            deadline = time.monotonic() + config.CONTROL_RETRY_TIMEOUT_S
+            while True:
+                remaining = deadline - time.monotonic()
+                reply = self._receive(remaining) if remaining > 0 else None
+                if reply is None:
+                    self.log.emit("TIMEOUT", sequence=boundary,
+                                  mode=self.active_mode,
+                                  reason=f"MODE_ECHO;attempt {attempt}")
+                    break
+                if reply.type is not PacketType.MODE:
+                    continue        # a duplicate ACK arriving after quiescence
+                echo = pk.ModePayload.from_payload(reply.payload)
+                if echo.epoch != epoch or echo.mode != target:
+                    self.log.emit("MODE", mode=self.active_mode,
+                                  reason=f"STALE_ECHO;epoch={echo.epoch}")
+                    continue
+                return self._commit_switch(strategy, state, decision, target, epoch)
+
+        # Out of retries. The transfer continues in the current mode: a failed
+        # switch is a logged non-event, never a half-switched transfer
+        # (specs.md §13, design.md §6.3 step 5).
+        self.controller.abandon_switch(time.monotonic())
+        self.log.emit("TIMEOUT", sequence=boundary, mode=self.active_mode,
+                      loss_estimate=decision.loss_estimate,
+                      reason=f"MODE_HANDSHAKE_ABANDONED;target={target}")
+        return strategy
+
+    def _commit_switch(self, strategy, state: SenderTransferState,
+                       decision, target: str, epoch: int):
+        """The receiver echoed. Adopt the new mode and rebuild the strategy."""
+        now = time.monotonic()
+        previous = self.active_mode
+        self.controller.commit_switch(decision, now)
+
+        if not self.controller.switching_enabled:
+            # T5.6: the exchange happened, the semantics did not change. Logged
+            # as a SWITCH so the drain cost is visible in the evidence, with a
+            # reason that keeps it out of any count of real transitions.
+            self.log.emit("SWITCH", sequence=state.next_seq, mode=self.active_mode,
+                          window_size=self.window,
+                          loss_estimate=decision.loss_estimate,
+                          reason=(f"FIXED_HYBRID_NOOP;from={previous};"
+                                  f"would={decision.target_mode};epoch={epoch}"))
+            return strategy
+
+        self._drain_timers(strategy)        # the old strategy's last transitions
+        self.active_mode = target
+        rebuilt = make_sender_strategy(target, state, self.rto)
+        # Segment payloads and the acknowledgement set live in ``state``, not in
+        # the strategy, so nothing unacknowledged can be lost here — the
+        # invariant holds by construction rather than by argument (HY-05).
+        self.log.emit("SWITCH", sequence=state.next_seq, mode=target,
+                      window_size=self.window,
+                      loss_estimate=decision.loss_estimate,
+                      reason=f"{decision.reason};from={previous};epoch={epoch}")
+        return rebuilt
 
     def _finish(self) -> pk.FinAckPayload:
         """FINISHING: send FIN, await the receiver's integrity verdict."""
@@ -317,16 +457,16 @@ class Sender:
 
         for attempt in range(1, config.CONTROL_RETRY_LIMIT + 1):
             self._send(fin)
-            self.log.emit("FIN", sequence=len(self.segments), mode=self.mode,
+            self.log.emit("FIN", sequence=len(self.segments), mode=self.active_mode,
                           reason=f"attempt {attempt}")
             reply = self._receive(config.CONTROL_RETRY_TIMEOUT_S)
             if reply is None:
-                self.log.emit("TIMEOUT", mode=self.mode, reason="FIN_ACK")
+                self.log.emit("TIMEOUT", mode=self.active_mode, reason="FIN_ACK")
                 continue
             if reply.type is not PacketType.FIN_ACK:
                 continue
             verdict = pk.FinAckPayload.from_payload(reply.payload)
-            self.log.emit("FIN_ACK", mode=self.mode,
+            self.log.emit("FIN_ACK", mode=self.active_mode,
                           reason="MATCH" if verdict.match else "HASH_MISMATCH")
             return verdict
 
@@ -362,7 +502,7 @@ class Sender:
         except TransferError as exc:
             error = str(exc)
             self._transition("ERROR")
-            self.log.emit("ERROR", mode=self.mode, reason=error)
+            self.log.emit("ERROR", mode=self.active_mode, reason=error)
         finally:
             elapsed = time.monotonic() - started
             metrics = self._metrics(elapsed, verdict, error)
@@ -376,6 +516,10 @@ class Sender:
                 "final_state": self.state,
                 "impairment": self.impairment.as_dict(),
                 "rto_s": self.rto,
+                # specs.md §10, in full, for a hybrid run; absent for a fixed
+                # strategy, where there is no controller to have a state.
+                "controller": (self.controller.snapshot(time.monotonic())
+                               if self.controller else None),
             })
             self.log.close()
             if self._owns_socket:
@@ -386,14 +530,18 @@ class Sender:
         return metrics
 
     def _metrics(self, elapsed: float, verdict, error: str | None) -> dict:
-        """specs.md §20, as far as Phase 2 can populate it.
+        """specs.md §20. T6.2 audits that every one is also derivable from
+        events.csv alone (CC-06); these are the cross-check.
 
-        Switch count and mode residence stay at their Phase 2 values until the
-        hybrid controller exists (T5.1); T6.2 audits that every §20 metric is
-        derivable from events.csv alone.
+        Switch count and mode residence come from the controller when one is
+        running, and are zero for a fixed strategy — which is the truth about a
+        transfer that never had a second mode to be in.
         """
         delivered = self.filesize if (verdict and verdict.match) else 0
         transmitted = self.bytes_sent or 1
+        controller = self.controller
+        residence = (controller.stats.residence_times(time.monotonic())
+                     if controller else {})
         return {
             "completion_time_s": elapsed,
             "goodput_bytes_per_s": delivered / elapsed if elapsed > 0 else 0.0,
@@ -404,9 +552,14 @@ class Sender:
             "total_data_transmissions": self.data_sent + self.data_retransmitted,
             "bytes_transmitted": self.bytes_sent,
             "integrity_success": bool(verdict and verdict.match),
-            "switch_count": 0,
-            "gbn_residence_s": 0.0,
-            "sr_residence_s": 0.0,
+            "mode": self.mode,
+            "final_active_mode": self.active_mode,
+            "switch_count": controller.stats.switch_count if controller else 0,
+            "handshake_count": controller.stats.handshake_count if controller else 0,
+            "abandoned_switches": controller.stats.abandoned_switches if controller else 0,
+            "gbn_residence_s": residence.get("gbn", 0.0),
+            "sr_residence_s": residence.get("sr", 0.0),
+            "loss_estimate": controller.loss_estimate if controller else None,
             "rtt_mean_ms": (sum(self.rtt_samples) / len(self.rtt_samples)
                             if self.rtt_samples else None),
             "rtt_samples": len(self.rtt_samples),
@@ -420,7 +573,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default=config.HOST)
     parser.add_argument("--port", type=int, default=config.PORT)
     parser.add_argument("--mode", default="gbn", choices=sorted(MODE_TASKS),
-                        help="ARQ mode; 'saw' and 'gbn' are implemented")
+                        help="ARQ mode; 'gbn' and 'sr' are the measured baselines, "
+                             "'hybrid' switches between them, 'fixed-hybrid' is the "
+                             "switching-overhead control, 'saw' is the Phase 2 placeholder")
     parser.add_argument("--window", type=int, default=config.WINDOW_SIZE,
                         help="outstanding segments; ignored by --mode saw")
     parser.add_argument("--run-id", default=None, help="defaults to a generated id")
@@ -491,6 +646,11 @@ def main(argv: list[str] | None = None) -> int:
           f"in {metrics['completion_time_s']:.3f}s")
     print(f"goodput {metrics['goodput_bytes_per_s'] / 1024:.1f} KiB/s, "
           f"retransmissions {metrics['retransmission_count']}")
+    if sender.controller is not None:
+        print(f"mode: started {config.DEFAULT_MODE.lower()}, ended "
+              f"{metrics['final_active_mode']}, {metrics['switch_count']} switches "
+              f"over {metrics['handshake_count']} MODE handshakes "
+              f"({metrics['abandoned_switches']} abandoned)")
     print(f"integrity: {'OK' if metrics['integrity_success'] else 'FAILED'}")
     print(f"logs: {sender.log.directory}")
     return 0
