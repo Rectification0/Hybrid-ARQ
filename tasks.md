@@ -31,7 +31,7 @@ Per the source document §37, carried forward as the current baseline:
 | Analysis / graphs | ⬜ Not started |
 | Final demonstration | ⬜ Not started |
 
-Milestone map: **M1** ✅ · **M2** ✅ · **M3** ⏭️ current · **M4–M11** pending.
+Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ⏭️ current · **M5–M11** pending.
 
 ---
 
@@ -89,25 +89,28 @@ Milestone map: **M1** ✅ · **M2** ✅ · **M3** ⏭️ current · **M4–M11**
 
 ## Phase 2 — Basic transfer (M3)
 
-- [ ] **T2.1** Implement `sender.py`: CLI (`--file --host --port --mode --window`), file
+- [x] **T2.1** Implement `sender.py`: CLI (`--file --host --port --mode --window`), file
       read, SHA-256 metadata, START/START_ACK, segmentation, FIN/FIN_ACK, sender state
       machine (`design.md` §7.1).
       **Satisfies:** FR-01, FR-03, §6, §14 · **Done when:** a file transfers end to end at 0% loss.
-- [ ] **T2.2** Implement `receiver.py`: CLI (`--port --output`), bind, validate, in-order
+- [x] **T2.2** Implement `receiver.py`: CLI (`--port --output`), bind, validate, in-order
       write, hash comparison, receiver state machine (`design.md` §7.2).
       **Satisfies:** FR-02, FR-10, FR-11, IN-02, IN-05 · **Done when:** output hash matches source.
-- [ ] **T2.3** Implement the duplicate-write guard in the file writer (highest-delivered
+- [x] **T2.3** Implement the duplicate-write guard in the file writer (highest-delivered
       sequence check), independent of ARQ mode.
       **Satisfies:** SEQ-05, CC-03 · **Done when:** a replayed DATA packet writes nothing and logs `DUPLICATE`.
-- [ ] **T2.4** Implement control-packet retry budgets and the receiver idle timeout.
+- [x] **T2.4** Implement control-packet retry budgets and the receiver idle timeout.
       **Satisfies:** §13 (transfer timeout, receiver unavailable) · **Done when:** a sender
       started with no receiver fails with a clear error instead of hanging.
-- [ ] **T2.5** Implement the event emitter and `events.csv` / `summary.json` writers with the
+- [x] **T2.5** Implement the event emitter and `events.csv` / `summary.json` writers with the
       exact columns of `specs.md` §21.
       **Satisfies:** FR-09, §21, CC-06 · **Done when:** a 0%-loss run produces a complete,
       parseable event log and summary.
 
 **M3 complete when:** a file transfers correctly at 0% loss with hashes matching and logs written.
+*Done — 1 MiB over loopback, hashes match, events.csv + summary.json on both endpoints.
+Phase 2 transfers with a stop-and-wait placeholder strategy (`protocol/strategy.py`);
+GBN replaces it in T3.2 without touching `sender.py`.*
 
 ## Phase 3 — GBN (M4)
 

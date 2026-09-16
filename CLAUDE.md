@@ -148,8 +148,17 @@ silent corruption and never presented as success (CC-01).
 - **`conftest.py` at the root is load-bearing.** Pytest prepends the directory containing the
   rootmost `conftest.py` to `sys.path`, which is what lets `protocol/packet.py` do
   `import config` under test the same way it does when run from the project root.
-- **`receiver.py` does not exist yet** — T2.2 writes it. The M1 spike listener was moved to
-  `test/spike_receiver.py` so the name stays free. Nothing should import the spike.
+- **`ConnectionResetError` on a UDP socket is normal on Windows** and must never be treated
+  as fatal. Sending to a closed port provokes an ICMP port-unreachable that surfaces on the
+  next `recvfrom` as WinError 10054. There is no way to suppress it from Python
+  (`SIO_UDP_CONNRESET` is not exposed and `sock.ioctl` rejects the raw code), so every
+  receive loop handles it by continuing to wait. See `network/udp.py`.
+- **Phase 2 moves data with a stop-and-wait placeholder**, not a real ARQ mode.
+  `protocol/strategy.py` holds the interface from `design.md` §4; GBN (T3.2) and SR (T4.5)
+  implement the same one and drop in without changing `sender.py`. Stop-and-wait is not a
+  system under evaluation — the baselines are GBN and SR.
+- **The M1 spike listener** lives at `test/spike_receiver.py`; nothing should import it.
+  The real receiver is `receiver.py`.
 - **Placeholder modules are marked.** Files under `protocol/`, `network/` and `experiments/`
   that are not yet implemented say `NOT YET IMPLEMENTED — scaffold only` in their docstring
   and name the task that implements them. Don't mistake one for a finished module.
@@ -158,7 +167,10 @@ silent corruption and never presented as success (CC-01).
 
 ## Current state
 
-**Phase 0 (M1) and Phase 1 (M2) complete.** The packet layer is implemented and its format
-frozen; 251 unit tests pass. Next is **Phase 2 (T2.1–T2.5)**: `sender.py`, `receiver.py`,
-the duplicate-write guard, control retry budgets, and the event/summary writers — done when
-a file transfers end to end at 0% loss with matching hashes and a parseable event log.
+**Phases 0–2 complete (M1, M2, M3).** The packet layer is frozen, and a file transfers end
+to end at 0% loss with matching hashes and full event logs; 284 tests pass.
+
+Next is **Phase 3 (T3.1–T3.7)**: freeze D5 (GBN ACK semantics), then the GBN sender with
+`base`/`next_seq`/window and a single oldest-packet timer, cumulative ACK processing that
+never moves `base` backward, and timeout retransmission of the full outstanding range.
+It replaces the stop-and-wait placeholder by implementing the same strategy interface.

@@ -89,11 +89,14 @@ def baseline_rto(rtt_ms: float) -> float:
     return max(RTO_RTT_MULTIPLIER * (rtt_ms / 1000.0), RTO_FLOOR_S)
 
 
-# Control-packet retry budget before a transfer is abandoned with a clear error
-# rather than hanging (§13, T2.4).
-CONTROL_RETRY_LIMIT = 5             # NOT FROZEN — frozen by T2.4
-CONTROL_RETRY_TIMEOUT_S = 1.0       # NOT FROZEN — frozen by T2.4
-RECEIVER_IDLE_TIMEOUT_S = 30.0      # NOT FROZEN — frozen by T2.4
+# Retry budgets. specs.md §13 requires a transfer to abort after a configurable
+# retry policy and a receiver that never appears to be reported rather than
+# waited on forever — so every wait below is bounded (T2.4).
+CONTROL_RETRY_LIMIT = 5             # START / FIN attempts before giving up
+CONTROL_RETRY_TIMEOUT_S = 1.0       # per-attempt wait for START_ACK / FIN_ACK
+DATA_RETRY_LIMIT = 10               # retransmissions of one segment before abort
+RECEIVER_IDLE_TIMEOUT_S = 30.0      # receiver gives up if nothing arrives
+RECEIVER_LINGER_S = 2.0             # keep re-ACKing a repeated FIN after FIN_ACK
 
 # ---------------------------------------------------------------------------
 # Hybrid controller (specs.md §10, §16.9-§16.11 — decisions D8, D9)
@@ -141,3 +144,47 @@ RANDOM_SEED = 0             # per trial; derived by the runner and recorded (RP-
 TRIAL_COUNT = 5             # NOT FROZEN — D13, frozen by T8.1
 TRANSFER_FILE_SIZE_BYTES = 1 * 1024 * 1024   # NOT FROZEN — D14, frozen by T8.1
 EXPERIMENT_ABORT_TIMEOUT_S = 300.0           # NOT FROZEN — frozen by T8.2
+
+
+# ---------------------------------------------------------------------------
+# Run capture
+# ---------------------------------------------------------------------------
+
+
+def snapshot() -> dict:
+    """Every specs.md §15 parameter as a flat dict, for summary.json.
+
+    A run is only reproducible if the configuration it actually ran under is
+    recorded alongside its results (RP-01, RP-02), so this is written into
+    every run's summary rather than left implicit in the source file.
+    """
+    return {
+        "host": HOST,
+        "port": PORT,
+        "segment_size": SEGMENT_SIZE,
+        "initial_sequence": INITIAL_SEQUENCE,
+        "window_size": WINDOW_SIZE,
+        "sr_receive_window_size": SR_RECEIVE_WINDOW_SIZE,
+        "rto_s": RTO_S,
+        "rto_rtt_multiplier": RTO_RTT_MULTIPLIER,
+        "rto_floor_s": RTO_FLOOR_S,
+        "control_retry_limit": CONTROL_RETRY_LIMIT,
+        "control_retry_timeout_s": CONTROL_RETRY_TIMEOUT_S,
+        "data_retry_limit": DATA_RETRY_LIMIT,
+        "receiver_idle_timeout_s": RECEIVER_IDLE_TIMEOUT_S,
+        "loss_window_size": LOSS_WINDOW_SIZE,
+        "switch_high": SWITCH_HIGH,
+        "switch_low": SWITCH_LOW,
+        "hysteresis_count": HYSTERESIS_COUNT,
+        "evaluation_interval_segments": EVALUATION_INTERVAL_SEGMENTS,
+        "min_mode_residence_s": MIN_MODE_RESIDENCE_S,
+        "default_mode": DEFAULT_MODE,
+        "loss_rate": LOSS_RATE,
+        "ack_loss_rate": ACK_LOSS_RATE,
+        "rtt_ms": RTT_MS,
+        "jitter_ms": JITTER_MS,
+        "loss_schedule": LOSS_SCHEDULE,
+        "random_seed": RANDOM_SEED,
+        "trial_count": TRIAL_COUNT,
+        "transfer_file_size_bytes": TRANSFER_FILE_SIZE_BYTES,
+    }

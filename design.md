@@ -65,6 +65,9 @@ only ever swaps which implementation is active.
 | `sender.py` | CLI, file reading, transfer lifecycle, sender orchestration |
 | `receiver.py` | CLI, socket setup, receiving, reconstruction |
 | `config.py` | All tunable parameters in one place (specs.md §15) |
+| `eventlog.py` | The single event emitter behind both endpoints (§9) |
+| `protocol/strategy.py` | Strategy interface, transfer state, stop-and-wait baseline (§4) |
+| `network/udp.py` | UDP socket creation; the Windows ICMP-reset contract |
 | `protocol/packet.py` | Packet constants, serialization, parsing, checksum |
 | `protocol/gbn.py` | GBN sender/receiver state and retransmission |
 | `protocol/sr.py` | SR sender/receiver state, buffering, individual retransmission |
@@ -81,14 +84,17 @@ Hybrid-ARQ/
 ├── sender.py
 ├── receiver.py
 ├── config.py
+├── eventlog.py
 ├── protocol/
 │   ├── __init__.py
 │   ├── packet.py
+│   ├── strategy.py
 │   ├── gbn.py
 │   ├── sr.py
 │   └── hybrid.py
 ├── network/
 │   ├── __init__.py
+│   ├── udp.py
 │   └── simulator.py
 ├── experiments/
 │   ├── run_experiment.py
@@ -478,6 +484,10 @@ protocol path is byte-identical to an unimpaired run.
 
 Two artifacts per run, both under `logs/<run_id>/`, written from a single event emitter so
 the sender and receiver produce identically-shaped records:
+
+Sender and receiver are separate processes, so each writes into its own
+`logs/<run_id>/<endpoint>/` subdirectory; the filenames and columns below are shared,
+which is what lets the two logs be concatenated and interleaved during analysis.
 
 - `events.csv` — one row per protocol event, columns exactly as specs.md §21:
   `timestamp, run_id, endpoint, event, sequence, ack, mode, window_size, loss_estimate, rtt_ms, reason`
