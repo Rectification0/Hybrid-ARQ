@@ -15,9 +15,16 @@ Why this module exists rather than a ``print`` in each endpoint:
 * **Every metric in specs.md §20 must be derivable from events.csv alone**
   (CC-06, FR-14). Nothing may be computed in memory and only printed, because
   the raw logs have to be sufficient to explain any result after the fact.
-* ``timestamp`` is seconds since the emitter was created, from a *monotonic*
-  clock, so sender and receiver logs interleave correctly without the two
-  processes agreeing on wall-clock time.
+* ``timestamp`` is seconds since this log's origin, from ``time.perf_counter``,
+  so no timeline can jump if the system clock is adjusted mid-transfer.
+  ``time.perf_counter`` rather than ``time.monotonic``: both are monotonic, but
+  on Windows ``monotonic`` is ``GetTickCount64`` with a **15.6 ms** resolution,
+  which quantises every RTT sample and every residence time to a tick. At the
+  10 ms RTT condition of E7 that is not a measurement at all. ``perf_counter``
+  is ``QueryPerformanceCounter``, resolution ~100 ns, and is monotonic by the
+  same guarantee (T6.2). The two clocks must never be mixed, since their
+  origins differ — nothing in this project calls ``time.monotonic``, and a test
+  enforces that.
 * Logs are append-only and never rewritten (RP-07). Aggregation reads them.
 * Writes are buffered and flushed periodically. Per-event ``fsync`` would
   distort the very timings the log exists to measure.
@@ -38,9 +45,17 @@ from typing import Any
 import config
 
 #: specs.md §21, in order. The header of every events.csv.
+#:
+#: ``bytes`` was added in T6.2. Retransmission overhead is defined in specs.md
+#: §20 as *retransmitted bytes over total transmitted bytes*, and goodput as
+#: delivered application bytes over time — neither is computable from a log that
+#: records only sequence numbers, so CC-06 was not actually satisfied without
+#: it. On SEND and RETX it is the size of the datagram put on the wire; on
+#: DELIVER it is the application payload written to the file. Elsewhere it is
+#: empty.
 EVENT_COLUMNS = [
     "timestamp", "run_id", "endpoint", "event", "sequence", "ack",
-    "mode", "window_size", "loss_estimate", "rtt_ms", "reason",
+    "mode", "window_size", "loss_estimate", "rtt_ms", "bytes", "reason",
 ]
 
 #: design.md §9. Emitting a name outside this set raises, so a typo cannot
@@ -98,7 +113,16 @@ def software_version() -> dict[str, Any]:
 class EventLog:
     """Append-only event writer for one endpoint of one run."""
 
-    def __init__(self, run_id: str, endpoint: str, log_dir: Path | str | None = None):
+    def __init__(self, run_id: str, endpoint: str, log_dir: Path | str | None = None,
+                 t0: float | None = None):
+        """``t0`` sets the timeline's origin, on the ``time.perf_counter`` clock.
+
+        The receiver needs it (T6.1): its log cannot be opened until a START
+        names the run, but packets can arrive — and be rejected — before that.
+        Passing the moment the socket was bound lets those earlier events be
+        replayed onto the same timeline instead of being dropped or, worse,
+        appearing to have happened at zero.
+        """
         if endpoint not in ENDPOINTS:
             raise ValueError(f"endpoint must be one of {sorted(ENDPOINTS)}, got {endpoint!r}")
 
@@ -116,9 +140,10 @@ class EventLog:
         self._pending = 0
         self._closed = False
 
-        # Monotonic so the timeline cannot jump if the system clock is adjusted
-        # mid-transfer; wall-clock start is recorded separately in the summary.
-        self._t0 = time.monotonic()
+        # A monotonic, high-resolution clock, so the timeline cannot jump if the
+        # system clock is adjusted mid-transfer and a sub-millisecond RTT is
+        # still measurable; wall-clock start is recorded separately below.
+        self._t0 = time.perf_counter() if t0 is None else t0
         self.started_wall = time.time()
 
         self.counts: dict[str, int] = {}
@@ -128,12 +153,19 @@ class EventLog:
     @property
     def elapsed(self) -> float:
         """Seconds since this log was created — the transfer's own clock."""
-        return time.monotonic() - self._t0
+        return time.perf_counter() - self._t0
 
     def emit(self, event: str, *, sequence: int | None = None, ack: int | None = None,
              mode: str | None = None, window_size: int | None = None,
              loss_estimate: float | None = None, rtt_ms: float | None = None,
-             reason: str | None = None) -> None:
+             size_bytes: int | None = None, reason: str | None = None,
+             timestamp: float | None = None) -> None:
+        """Append one event row.
+
+        ``timestamp`` overrides the elapsed clock, and exists only so an event
+        observed before this log could be opened is recorded at the moment it
+        actually happened (T6.1). Live emission never passes it.
+        """
         if event not in EVENT_NAMES:
             raise ValueError(f"{event!r} is not in the design.md §9 event vocabulary")
         if self._closed:
@@ -141,13 +173,15 @@ class EventLog:
 
         self.counts[event] = self.counts.get(event, 0) + 1
         self._writer.writerow([
-            f"{self.elapsed:.6f}", self.run_id, self.endpoint, event,
+            f"{self.elapsed if timestamp is None else timestamp:.6f}",
+            self.run_id, self.endpoint, event,
             "" if sequence is None else sequence,
             "" if ack is None else ack,
             "" if mode is None else mode,
             "" if window_size is None else window_size,
             "" if loss_estimate is None else f"{loss_estimate:.6f}",
             "" if rtt_ms is None else f"{rtt_ms:.3f}",
+            "" if size_bytes is None else size_bytes,
             "" if reason is None else reason,
         ])
 
@@ -162,14 +196,25 @@ class EventLog:
 
     # -- summary -----------------------------------------------------------
 
-    def write_summary(self, metrics: dict[str, Any], *, extra: dict[str, Any] | None = None) -> Path:
-        """Write summary.json: what was run, on what code, with what result."""
+    def write_summary(self, metrics: dict[str, Any], *,
+                      extra: dict[str, Any] | None = None,
+                      config_overrides: dict[str, Any] | None = None) -> Path:
+        """Write summary.json: what was run, on what code, with what result.
+
+        ``config_overrides`` carries the values this run *actually* used where
+        they differ from the module defaults — the seed, the derived RTO, the
+        impairment condition, the file size, the controller's thresholds. A
+        recorded configuration that is merely the source file's defaults would
+        describe a run nobody performed, which is precisely the failure RP-01
+        and RP-02 exist to prevent (T6.3).
+        """
         document = {
             "run_id": self.run_id,
             "endpoint": self.endpoint,
             "started_wall_clock": self.started_wall,
             "duration_s": self.elapsed,
-            "config": config.snapshot(),
+            "config": config.snapshot(config_overrides),
+            "decisions": config.frozen_decisions(),
             "software": software_version(),
             "event_counts": dict(sorted(self.counts.items())),
             "metrics": metrics,

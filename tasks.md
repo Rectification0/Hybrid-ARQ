@@ -27,11 +27,11 @@ Per the source document §37, carried forward as the current baseline:
 | SR | ✅ Completed |
 | Loss simulation | ✅ Completed |
 | Hybrid controller | ✅ Completed |
-| Experiment automation | ⏭️ **Next** |
+| Experiment automation | ⏭️ **Next** (Phase 7 calibration first) |
 | Analysis / graphs | ⬜ Not started |
 | Final demonstration | ⬜ Not started |
 
-Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ✅ · **M8** ⏭️ current · **M9–M11** pending.
+Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ✅ · **M8** ✅ · **M9–M11** pending (Phase 7 calibration is next).
 
 ---
 
@@ -224,17 +224,26 @@ have to rewrite them.*
 
 ## Phase 6 — Logging completeness (M8)
 
-- [ ] **T6.1** Audit every event in the `design.md` §9 vocabulary against the code; add any
+- [x] **T6.1** Audit every event in the `design.md` §9 vocabulary against the code; add any
       missing emission point.
       **Satisfies:** §21
-- [ ] **T6.2** Confirm every metric in `specs.md` §20 is computable from `events.csv` alone,
+- [x] **T6.2** Confirm every metric in `specs.md` §20 is computable from `events.csv` alone,
       with no in-memory-only value.
       **Satisfies:** FR-14, CC-06
-- [ ] **T6.3** Record the full frozen config, seed, file size, and software version/commit in
+- [x] **T6.3** Record the full frozen config, seed, file size, and software version/commit in
       `summary.json`.
       **Satisfies:** RP-01, RP-02, RP-08
 
 **M8 complete when:** automated event logs are generated for every run without manual steps.
+*Done — the audit found four real gaps, not a clean bill of health: the receiver never
+logged its idle timeout, a receiver that never saw a START wrote no log at all, packets
+rejected before START were dropped from the record, and retransmission overhead and goodput
+were **not** in fact derivable from `events.csv` because nothing recorded a byte count. The
+`bytes` column (specs.md §21) closes the last one; `metrics.py` derives all of §20 from event
+rows and nothing else, and the tests assert it agrees with what the endpoints computed while
+running. `summary.json` now records the configuration each run actually used — seed,
+impairment, derived RTO, file size, swept thresholds — plus the freeze state of every D1–D14
+decision and the commit that produced it. 494 tests pass.*
 
 ## Phase 7 — Threshold calibration
 

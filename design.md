@@ -66,6 +66,7 @@ only ever swaps which implementation is active.
 | `receiver.py` | CLI, socket setup, receiving, reconstruction |
 | `config.py` | All tunable parameters in one place (specs.md §15) |
 | `eventlog.py` | The single event emitter behind both endpoints (§9) |
+| `metrics.py` | Derives the specs.md §20 metrics from `events.csv` alone (CC-06) |
 | `protocol/strategy.py` | Strategy interface, transfer state, stop-and-wait baseline (§4) |
 | `network/udp.py` | UDP socket creation; the Windows ICMP-reset contract |
 | `protocol/packet.py` | Packet constants, serialization, parsing, checksum |
@@ -85,6 +86,7 @@ Hybrid-ARQ/
 ├── receiver.py
 ├── config.py
 ├── eventlog.py
+├── metrics.py
 ├── protocol/
 │   ├── __init__.py
 │   ├── packet.py
@@ -490,7 +492,7 @@ Sender and receiver are separate processes, so each writes into its own
 which is what lets the two logs be concatenated and interleaved during analysis.
 
 - `events.csv` — one row per protocol event, columns exactly as specs.md §21:
-  `timestamp, run_id, endpoint, event, sequence, ack, mode, window_size, loss_estimate, rtt_ms, reason`
+  `timestamp, run_id, endpoint, event, sequence, ack, mode, window_size, loss_estimate, rtt_ms, bytes, reason`
 - `summary.json` — the frozen run configuration (every value from specs.md §15, plus seed,
   file size, software version/commit per RP-08) and the final metrics of specs.md §20.
 
@@ -510,14 +512,69 @@ needs to see, and it is not a transition. `SWITCH` therefore means "the mode cha
 `FIXED_HYBRID_NOOP` is the `--mode fixed-hybrid` control paying the drain without changing
 semantics; a count of real transitions is the count of `SWITCH` rows excluding those.
 
+`bytes` was added in T6.2. Retransmission overhead is defined in bytes (specs.md §20) and
+so is goodput, and neither is computable from a log that records only sequence numbers —
+CC-06 was not in fact satisfied before it existed. On `SEND` and `RETX` it is the datagram
+size as it went on the wire; on `DELIVER` it is the application payload written to the
+file; elsewhere it is empty.
+
+### 9.1 Event audit (T6.1)
+
+Every name in the vocabulary, the endpoint that emits it, and what makes it happen. The
+audit is enforced by `test/test_logging.py`, not only recorded here: a name with no emitter,
+an emitter outside the vocabulary, and a drift between this list and the code each fail a
+test.
+
+| Event | Emitted by | When |
+| --- | --- | --- |
+| `SEND` | sender | a segment goes out for the first time |
+| `RETX` | sender | a segment goes out again; `reason` names the trigger (TO-05) |
+| `ACK` | both | sender: an ACK arrives, `reason=DUPLICATE` if it carried nothing new. Receiver: an ACK is sent |
+| `TIMEOUT` | both | sender: an RTO fires, or a control exchange runs out of time. Receiver: the idle timeout expires |
+| `TIMER_START` / `TIMER_STOP` | sender | a strategy arms or cancels a timer, queued via `TimerTracker` and drained by the endpoint (TO-02) |
+| `SWITCH` | both | the active mode changed, or — with `reason=FIXED_HYBRID_NOOP` — a `fixed-hybrid` handshake completed without changing it |
+| `MODE` | both | a MODE request or echo was sent, refused, repeated or found stale |
+| `DROP` | both | the simulator discarded a datagram; a *simulated* loss, never real corruption (IN-04) |
+| `CHECKSUM_FAIL` | both | a datagram arrived with a bad CRC-32 — real corruption |
+| `MALFORMED` | both | a datagram failed any other `decode()` check |
+| `DUPLICATE` | receiver | a DATA segment arrived that had already been received |
+| `DELIVER` | receiver | a segment was written to the output file |
+| `LOSS_CHANGE` | both | a `loss_schedule` step changed the condition (T4.2) |
+| `START` / `START_ACK` / `FIN` / `FIN_ACK` | both | the control exchange, from either side |
+| `ERROR` | both | the transfer failed; `reason` carries the message the user is told |
+
+Two deliberate asymmetries, decided by this audit rather than left to chance:
+
+- **A duplicate ACK is not a `DUPLICATE` row.** `DUPLICATE` means a duplicate *DATA* arrival
+  at the receiver. A duplicate ACK is an `ACK` row with `reason=DUPLICATE`, which keeps
+  `ACK` rows a complete count of the ACKs actually received.
+- **The receiver emits no timer events** and the sender emits no `DELIVER`, because the
+  receiver owns no timers and the sender writes no file. An event absent from one endpoint's
+  log means it cannot happen there, not that it went unrecorded.
+
+The receiver's log cannot be opened until a START names the run, so events observed before
+that — a rejected packet, the idle timeout when no sender ever appears — are held with the
+time they occurred and replayed onto the same timeline when the log opens. A receiver that
+never hears from anyone still writes `events.csv` and `summary.json`, because a run that
+produced no log at all is a run nobody can explain afterwards.
+
 Design rules:
 
-- `timestamp` is seconds from transfer start (monotonic clock), so sender and receiver logs
-  can be interleaved without depending on wall-clock agreement.
+- `timestamp` is seconds from that endpoint's start, on `time.perf_counter` — monotonic like
+  `time.monotonic` but ~100 ns rather than the 15.6 ms of `GetTickCount64` on Windows, which
+  would quantise every RTT sample and residence time to a tick and make E7's 10 ms RTT cell
+  unmeasurable (T6.2). The sender's origin is the moment its log was created and the
+  receiver's is the moment it bound its socket, so the two are *not* on a common origin:
+  interleave the logs by aligning on the `START` row they share, and never subtract one
+  endpoint's timestamp from the other's.
 - `SEND` and `RETX` are distinct events; retransmission count is a count of `RETX`, and
   `reason` distinguishes `TIMEOUT` from other triggers (TO-05).
 - Every metric in specs.md §20 is derivable from `events.csv` alone. Nothing is computed only
   in memory and printed, because raw logs must be sufficient to explain any result (CC-06).
+  `metrics.py` is that claim made checkable: it derives §20 from event rows and nothing else,
+  and T6.2 asserts it agrees with what the endpoints computed while running. The endpoints
+  keep their own counters as a cross-check; if one ever became the only source of a metric,
+  the derivation would have nothing to read and the test would fail.
 - Logs are append-only and never edited (RP-07). Aggregation reads them; it does not modify them.
 - Writing is buffered and flushed at intervals — per-event `fsync` would distort the timing
   measurements the logs exist to record.

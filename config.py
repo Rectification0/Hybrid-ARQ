@@ -157,13 +157,32 @@ EXPERIMENT_ABORT_TIMEOUT_S = 300.0           # NOT FROZEN — frozen by T8.2
 # ---------------------------------------------------------------------------
 
 
-def snapshot() -> dict:
+def snapshot(overrides: dict | None = None) -> dict:
     """Every specs.md §15 parameter as a flat dict, for summary.json.
 
     A run is only reproducible if the configuration it actually ran under is
     recorded alongside its results (RP-01, RP-02), so this is written into
     every run's summary rather than left implicit in the source file.
+
+    ``overrides`` replaces the module defaults with what a run actually used:
+    the seed and impairment come from the CLI, the RTO is derived per condition
+    (D7), and a hybrid run's thresholds may be supplied per sweep (T7.1). An
+    unknown key raises rather than being added silently — a typo that invented a
+    parameter would leave the recorded config quietly wrong, which is worse than
+    not recording it at all (T6.3).
     """
+    values = _defaults()
+    for key, value in (overrides or {}).items():
+        if key not in values:
+            raise KeyError(
+                f"{key!r} is not a specs.md §15 parameter; add it to snapshot() "
+                f"first rather than recording an unknown key")
+        values[key] = value
+    return values
+
+
+def _defaults() -> dict:
+    """The module's own values, before a run's overrides are applied."""
     return {
         "host": HOST,
         "port": PORT,
@@ -194,3 +213,58 @@ def snapshot() -> dict:
         "trial_count": TRIAL_COUNT,
         "transfer_file_size_bytes": TRANSFER_FILE_SIZE_BYTES,
     }
+
+
+#: Which of the decisions in design.md §12 are settled, and where each one's
+#: value actually lives (T6.3, RP-08). Values that belong to another module are
+#: named by source rather than copied here: duplicating the struct format or the
+#: ACK convention into config.py is exactly how the two drift apart. What this
+#: records is the *freeze state* — which is what a reader of an old run needs in
+#: order to know whether a later result is comparable with it.
+_DECISIONS = (
+    ("D1", "packet byte layout and endianness", "T1.1", "protocol/packet.py", None),
+    ("D2", "checksum algorithm and coverage", "T1.2", "protocol/packet.py", None),
+    ("D3", "maximum DATA payload", "T1.3", "config.SEGMENT_SIZE", "segment_size"),
+    ("D4", "initial sequence convention", "T1.3", "config.INITIAL_SEQUENCE", "initial_sequence"),
+    ("D5", "GBN ACK semantics", "T3.1", "protocol/gbn.py", None),
+    ("D6", "SR ACK semantics", "T4.4", "protocol/sr.py", None),
+    ("D7", "baseline RTO policy", "T4.9", "config.baseline_rto()", "rto_s"),
+    ("D8", "loss estimator", "T5.2", "protocol/hybrid.py", "loss_window_size"),
+    ("D10", "mode transition mechanism", "T5.4", "sender.py / receiver.py", None),
+    ("D11", "primary window size", "T4.9", "config.WINDOW_SIZE", "window_size"),
+)
+
+#: Still open, with the task that closes each. D9 is the experiment-invalidating
+#: one: it is deliberately left to Phase 7 so the thresholds are calibrated
+#: against real data rather than guessed before any exists.
+_OPEN_DECISIONS = (
+    ("D9", "switching thresholds and hysteresis", "T7.2"),
+    ("D12", "experiment repetition count", "T8.1"),
+    ("D13", "random-seed policy", "T8.1"),
+    ("D14", "file size(s)", "T8.1"),
+)
+
+
+def frozen_decisions(overrides: dict | None = None) -> dict:
+    """Freeze state of every design.md §12 decision, for summary.json.
+
+    Frozen values that live in config.py are read back through ``snapshot`` so
+    a run's *effective* value is recorded, not the module default.
+    """
+    values = snapshot(overrides)
+    decisions = {
+        identifier: {
+            "decision": what,
+            "status": "frozen",
+            "frozen_by": task,
+            "source": source,
+            "value": values[key] if key else None,
+        }
+        for identifier, what, task, source, key in _DECISIONS
+    }
+    decisions.update({
+        identifier: {"decision": what, "status": "open", "frozen_by": task,
+                     "source": None, "value": None}
+        for identifier, what, task in _OPEN_DECISIONS
+    })
+    return dict(sorted(decisions.items(), key=lambda item: int(item[0][1:])))

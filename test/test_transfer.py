@@ -475,9 +475,12 @@ def test_event_log_rejects_an_unknown_endpoint(tmp_path):
 
 
 def test_event_log_columns_match_the_spec_exactly():
+    """specs.md §21. ``bytes`` joined the table in T6.2: retransmission overhead
+    and goodput are both defined in bytes, so a log of sequence numbers alone
+    could not satisfy CC-06."""
     assert EVENT_COLUMNS == [
         "timestamp", "run_id", "endpoint", "event", "sequence", "ack",
-        "mode", "window_size", "loss_estimate", "rtt_ms", "reason",
+        "mode", "window_size", "loss_estimate", "rtt_ms", "bytes", "reason",
     ]
 
 

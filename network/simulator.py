@@ -135,7 +135,7 @@ class ImpairedSocket:
         self._recv_rng = random.Random(f"{seed}/recv")
         self._jitter_rng = random.Random(f"{seed}/jitter")
 
-        self._t0 = time.monotonic()
+        self._t0 = time.perf_counter()
         self._active_loss = self._scheduled_rate_at(0.0)
         self._timeout: float | None = None
 
@@ -168,7 +168,7 @@ class ImpairedSocket:
         """
         if not self._schedule:
             return self._loss_rate
-        rate = self._scheduled_rate_at(time.monotonic() - self._t0)
+        rate = self._scheduled_rate_at(time.perf_counter() - self._t0)
         if rate != self._active_loss:
             previous, self._active_loss = self._active_loss, rate
             self._emit("LOSS_CHANGE", "send", None,
@@ -193,10 +193,10 @@ class ImpairedSocket:
         return len(data)
 
     def recvfrom(self, bufsize: int):
-        deadline = None if self._timeout is None else time.monotonic() + self._timeout
+        deadline = None if self._timeout is None else time.perf_counter() + self._timeout
         while True:
             if deadline is not None:
-                remaining = deadline - time.monotonic()
+                remaining = deadline - time.perf_counter()
                 if remaining <= 0:
                     raise socket.timeout("timed out")
                 # Re-arm on every pass: a discarded datagram must not silently
@@ -257,7 +257,7 @@ class ImpairedSocket:
         """
         with self._cond:
             heapq.heappush(self._queue,
-                           (time.monotonic() + delay, next(self._tiebreak), data, address))
+                           (time.perf_counter() + delay, next(self._tiebreak), data, address))
             if self._pump_thread is None:
                 self._pump_thread = threading.Thread(
                     target=self._pump, name="ImpairedSocket-delay", daemon=True)
@@ -272,7 +272,7 @@ class ImpairedSocket:
                 if not self._queue:
                     return                      # closed and drained
                 release, _, data, address = self._queue[0]
-                now = time.monotonic()
+                now = time.perf_counter()
                 if release > now:
                     self._cond.wait(release - now)
                     continue

@@ -138,10 +138,27 @@ RTT conditions of E7 while keeping the three systems comparable within each cell
 ### Logging is the product
 
 Every metric in `specs.md` §20 must be computable from `events.csv` alone — nothing
-in-memory-only and printed (CC-06). Logs are append-only and never edited; aggregation reads
-them and does not modify them (RP-07). `SEND` and `RETX` are distinct events. Timestamps are
-seconds from transfer start on a monotonic clock, so sender and receiver logs interleave
-without wall-clock agreement.
+in-memory-only and printed (CC-06). `metrics.py` is that rule made checkable: it derives §20
+from event rows and nothing else, and T6.2 asserts it agrees with the endpoints' own
+counters. If a metric ever became in-memory-only, the derivation would have nothing to read.
+Logs are append-only and never edited; aggregation reads them and does not modify them
+(RP-07). `SEND` and `RETX` are distinct events. The `bytes` column carries the datagram size
+on `SEND`/`RETX` and the payload written on `DELIVER` — without it, retransmission overhead
+and goodput are not derivable at all.
+
+Timestamps come from **`time.perf_counter`, never `time.monotonic`** — on Windows the latter
+is `GetTickCount64` at 15.6 ms resolution, which quantises every RTT sample and residence
+time to a tick and makes E7's 10 ms RTT cell unmeasurable. A test enforces that no endpoint,
+the emitter or the simulator calls `time.monotonic()`; mixing the two would also compare
+timestamps from different origins. Each log's origin is **that endpoint's** start — the
+sender's when its log opened, the receiver's when it bound — so interleave by aligning on the
+shared `START` row, and never subtract one endpoint's timestamp from the other's. The receiver holds events seen before START (its log cannot open
+until START names the run) and replays them onto its timeline; a receiver that never hears
+from anyone still writes `events.csv` and `summary.json`.
+
+`summary.json` records the configuration the run *actually* used, not the module defaults —
+`config.snapshot(overrides)` takes the seed, impairment, derived RTO, file size and any
+swept thresholds, and rejects an unknown key rather than silently recording a typo.
 
 Integrity failures must stay distinguishable from simulated loss (IN-04): that is why
 `decode()` raises a specific `PacketError` subclass per failure mode, and why `DROP` and
@@ -197,6 +214,12 @@ being refused, repeated or abandoned. A `SWITCH` row whose reason is `FIXED_HYBR
 the `--mode fixed-hybrid` control paying the drain cost without changing semantics, so a
 count of real transitions excludes those rows.
 
-**Phase 6 (T6.1–T6.3) is next**: audit the event vocabulary against the code, confirm every
-specs.md §20 metric is computable from `events.csv` alone, and record the full frozen
-config, seed and commit in `summary.json`.
+**Phase 6 complete (M8).** The audit found four real gaps rather than confirming the log was
+already sufficient: the receiver did not log its idle timeout, a receiver that never saw a
+START wrote no log at all, packets rejected before START were dropped, and overhead and
+goodput were not derivable because nothing recorded a byte count. `design.md` §9.1 is the
+audit table, enforced by `test/test_logging.py`. 494 tests pass.
+
+**Phase 7 (T7.1–T7.3) is next**: sweep the thresholds over the loss grid, freeze D9 against
+the evidence, and report any setting that made the hybrid *worse* than a fixed strategy —
+that is a result, not a bug to bury (H-05).

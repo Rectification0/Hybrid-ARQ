@@ -135,9 +135,9 @@ class Sender:
         continues on the remaining budget — a corrupted datagram must not be
         mistaken for silence (specs.md §13, IN-04).
         """
-        deadline = time.monotonic() + timeout
+        deadline = time.perf_counter() + timeout
         while True:
-            remaining = deadline - time.monotonic()
+            remaining = deadline - time.perf_counter()
             if remaining <= 0:
                 return None
             self.sock.settimeout(remaining)
@@ -243,7 +243,7 @@ class Sender:
         # A hybrid transfer runs a real ARQ strategy at every instant; the
         # controller only decides *which* one, and never sits in the data path.
         self.controller = hybrid.make_controller(
-            self.mode, time.monotonic(), self.hybrid_settings)
+            self.mode, time.perf_counter(), self.hybrid_settings)
         strategy = make_sender_strategy(self.active_mode, state, self.rto)
 
         self._sent_once = set()
@@ -253,7 +253,7 @@ class Sender:
 
         while not strategy.all_acked():
             if self._pending_switch is None:
-                for seq in strategy.packets_to_send(time.monotonic()):
+                for seq in strategy.packets_to_send(time.perf_counter()):
                     self._emit_data(seq, is_retx=False)
             elif state.is_quiescent():
                 # The window has drained: no packet's fate now depends on which
@@ -270,10 +270,10 @@ class Sender:
             # RTO regardless would let a timer armed mid-wait go unnoticed until
             # the following wait ended, making a retransmission up to two RTOs
             # late — visible as inflated completion times under loss.
-            pending = strategy.next_timeout(time.monotonic())
+            pending = strategy.next_timeout(time.perf_counter())
             wait = self.rto if pending is None else max(0.0, min(pending, self.rto))
             reply = self._receive(wait)
-            now = time.monotonic()
+            now = time.perf_counter()
 
             if reply is not None and reply.type is PacketType.MODE:
                 # An echo from a handshake that has already been committed or
@@ -335,7 +335,7 @@ class Sender:
         payload = self.segments[seq]
         size = self._send(Packet(type=PacketType.DATA, seq=seq,
                                  window=self.window, payload=payload))
-        self._sent_at[seq] = time.monotonic()
+        self._sent_at[seq] = time.perf_counter()
         self._attempts[seq] = self._attempts.get(seq, 0) + 1
 
         retransmission = is_retx or seq in self._sent_once
@@ -344,12 +344,13 @@ class Sender:
             self.data_retransmitted += 1
             self.bytes_retransmitted += size
             self.log.emit("RETX", sequence=seq, mode=self.active_mode,
-                          window_size=self.window, reason="TIMEOUT")
+                          window_size=self.window, size_bytes=size,
+                          reason="TIMEOUT")
         else:
             self._sent_once.add(seq)
             self.data_sent += 1
             self.log.emit("SEND", sequence=seq, mode=self.active_mode,
-                          window_size=self.window)
+                          window_size=self.window, size_bytes=size)
         self.bytes_sent += size
         if self.controller:
             self.controller.on_transmission(seq, retransmitted=retransmission)
@@ -389,9 +390,9 @@ class Sender:
                           loss_estimate=decision.loss_estimate,
                           reason=f"REQUEST;target={target};epoch={epoch};"
                                  f"attempt {attempt}")
-            deadline = time.monotonic() + config.CONTROL_RETRY_TIMEOUT_S
+            deadline = time.perf_counter() + config.CONTROL_RETRY_TIMEOUT_S
             while True:
-                remaining = deadline - time.monotonic()
+                remaining = deadline - time.perf_counter()
                 reply = self._receive(remaining) if remaining > 0 else None
                 if reply is None:
                     self.log.emit("TIMEOUT", sequence=boundary,
@@ -410,7 +411,7 @@ class Sender:
         # Out of retries. The transfer continues in the current mode: a failed
         # switch is a logged non-event, never a half-switched transfer
         # (specs.md §13, design.md §6.3 step 5).
-        self.controller.abandon_switch(time.monotonic())
+        self.controller.abandon_switch(time.perf_counter())
         self.log.emit("TIMEOUT", sequence=boundary, mode=self.active_mode,
                       loss_estimate=decision.loss_estimate,
                       reason=f"MODE_HANDSHAKE_ABANDONED;target={target}")
@@ -419,7 +420,7 @@ class Sender:
     def _commit_switch(self, strategy, state: SenderTransferState,
                        decision, target: str, epoch: int):
         """The receiver echoed. Adopt the new mode and rebuild the strategy."""
-        now = time.monotonic()
+        now = time.perf_counter()
         previous = self.active_mode
         self.controller.commit_switch(decision, now)
 
@@ -479,7 +480,7 @@ class Sender:
 
     def run(self) -> dict:
         """Run the transfer. Returns the metrics dict written to summary.json."""
-        started = time.monotonic()
+        started = time.perf_counter()
         verdict = None
         error = None
         try:
@@ -504,9 +505,9 @@ class Sender:
             self._transition("ERROR")
             self.log.emit("ERROR", mode=self.active_mode, reason=error)
         finally:
-            elapsed = time.monotonic() - started
+            elapsed = time.perf_counter() - started
             metrics = self._metrics(elapsed, verdict, error)
-            self.log.write_summary(metrics, extra={
+            self.log.write_summary(metrics, config_overrides=self._run_config(), extra={
                 "source": {
                     "filename": self.path.name,
                     "filesize": self.filesize,
@@ -518,7 +519,7 @@ class Sender:
                 "rto_s": self.rto,
                 # specs.md §10, in full, for a hybrid run; absent for a fixed
                 # strategy, where there is no controller to have a state.
-                "controller": (self.controller.snapshot(time.monotonic())
+                "controller": (self.controller.snapshot(time.perf_counter())
                                if self.controller else None),
             })
             self.log.close()
@@ -528,6 +529,39 @@ class Sender:
         if error:
             raise TransferError(error)
         return metrics
+
+    def _run_config(self) -> dict:
+        """What this run actually used, for summary.json (T6.3, RP-01, RP-02).
+
+        The seed, the impairment condition, the derived RTO and the file size all
+        come from the command line or from D7's per-condition derivation, so the
+        module defaults describe none of them.
+        """
+        impairment = self.impairment
+        overrides = {
+            "window_size": self.window,
+            "rto_s": self.rto,
+            "random_seed": impairment.seed,
+            "loss_rate": impairment.loss_rate,
+            "ack_loss_rate": impairment.recv_loss_rate,
+            # Each direction carries half the round trip (design.md §8), so the
+            # condition's RTT is twice what this endpoint was configured with.
+            "rtt_ms": impairment.delay_ms * 2.0,
+            "jitter_ms": impairment.jitter_ms,
+            "loss_schedule": [list(step) for step in impairment.loss_schedule],
+            "transfer_file_size_bytes": self.filesize,
+        }
+        if self.controller is not None:
+            settings = self.controller.settings
+            overrides.update({
+                "loss_window_size": settings.loss_window_size,
+                "switch_high": settings.switch_high,
+                "switch_low": settings.switch_low,
+                "hysteresis_count": settings.hysteresis_count,
+                "evaluation_interval_segments": settings.evaluation_interval_segments,
+                "min_mode_residence_s": settings.min_mode_residence_s,
+            })
+        return overrides
 
     def _metrics(self, elapsed: float, verdict, error: str | None) -> dict:
         """specs.md §20. T6.2 audits that every one is also derivable from
@@ -540,7 +574,7 @@ class Sender:
         delivered = self.filesize if (verdict and verdict.match) else 0
         transmitted = self.bytes_sent or 1
         controller = self.controller
-        residence = (controller.stats.residence_times(time.monotonic())
+        residence = (controller.stats.residence_times(time.perf_counter())
                      if controller else {})
         return {
             "completion_time_s": elapsed,

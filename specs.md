@@ -501,9 +501,27 @@ Every important protocol event is recorded with enough context to reconstruct be
 | `window_size` | `8` |
 | `loss_estimate` | `0.071` |
 | `rtt_ms` | `103.4` |
+| `bytes` | `1045` |
 | `reason` | `TIMEOUT` / `MODE_THRESHOLD` |
 
 CSV is recommended for experiment summaries; detailed event logs may additionally use JSON.
+
+`bytes` was added in T6.2. §20 defines retransmission overhead as retransmitted bytes over
+total transmitted bytes, and goodput as delivered application bytes over time; neither is
+computable from a log that records only sequence numbers, so CC-06 was not actually
+satisfied without it. On `SEND` and `RETX` it is the datagram size on the wire, on
+`DELIVER` the application payload written to the file, and elsewhere it is empty.
+
+Timestamps are seconds from *that endpoint's* start, on `time.perf_counter`: monotonic, and
+fine-grained enough that the RTT statistics above survive the clock — `time.monotonic` is
+`GetTickCount64` on Windows, whose 15.6 ms resolution would quantise every sample and leave
+the 10 ms RTT cell of §19 unmeasurable. The sender's origin is when its log opened, the
+receiver's when it bound its socket, so the two logs are interleaved by aligning on the
+`START` row they share, and one endpoint's timestamps are never subtracted from the other's.
+
+Every metric in §20 is derivable from `events.csv` alone (CC-06). `metrics.py` performs
+that derivation from event rows and nothing else, and T6.2 asserts it agrees with what the
+endpoints computed while they ran.
 
 ## 22. Wireshark Requirements
 

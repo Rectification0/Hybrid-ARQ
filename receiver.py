@@ -122,6 +122,14 @@ class Receiver:
         self.sock = self.impairment.wrap(open_udp_socket(), self._on_impairment)
         self.state = "LISTENING"
         self.log: EventLog | None = None
+
+        # The log cannot be opened until a START names the run, but packets can
+        # arrive — and be rejected — before that, and a receiver that never gets
+        # a START must still leave a log behind (T6.1, M8). Events observed
+        # early are held here with the time they happened and replayed onto the
+        # same timeline once the log exists.
+        self._t0 = time.perf_counter()
+        self._pending_events: list[tuple[float, str, dict]] = []
         self.writer: OutputWriter | None = None
         self.start_info: pk.StartPayload | None = None
         # ``requested_mode`` is what the sender's START named — possibly a
@@ -149,9 +157,9 @@ class Receiver:
 
     def _receive(self, timeout: float):
         """Wait for one valid packet. Invalid ones are logged and skipped."""
-        deadline = time.monotonic() + timeout
+        deadline = time.perf_counter() + timeout
         while True:
-            remaining = deadline - time.monotonic()
+            remaining = deadline - time.perf_counter()
             if remaining <= 0:
                 return None, None
             self.sock.settimeout(remaining)
@@ -177,8 +185,26 @@ class Receiver:
                 self._log("MALFORMED", reason=f"{type(exc).__name__}: {exc}")
 
     def _log(self, event: str, **fields) -> None:
-        if self.log is not None:
-            self.log.emit(event, mode=self.mode, **fields)
+        if self.log is None:
+            # Before the log exists, hold the event with the mode and the moment
+            # it happened rather than dropping it (T6.1).
+            self._pending_events.append((time.perf_counter(), event,
+                                         dict(fields, mode=self.mode)))
+            return
+        self.log.emit(event, mode=self.mode, **fields)
+
+    def _open_log(self, run_id: str) -> None:
+        """Open the log on the receiver's own timeline and replay what preceded it.
+
+        ``t0`` is the moment this receiver started, not the moment the log was
+        created, so a rejected packet that arrived before START keeps its real
+        timestamp instead of appearing at zero.
+        """
+        self.run_id = run_id
+        self.log = EventLog(run_id, "receiver", log_dir=self.log_dir, t0=self._t0)
+        for moment, event, fields in self._pending_events:
+            self.log.emit(event, timestamp=moment - self._t0, **fields)
+        self._pending_events.clear()
 
     def _on_impairment(self, kind: str, direction: str, raw, **detail) -> None:
         """Log a simulated drop, distinctly from real corruption (IN-04, T4.3)."""
@@ -200,14 +226,14 @@ class Receiver:
         while True:
             pkt, address = self._receive(self.idle_timeout)
             if pkt is None:
+                self._log("TIMEOUT", reason=f"START;idle {self.idle_timeout:.1f}s")
                 raise ReceiverError(
                     f"no START within {self.idle_timeout:.0f}s — giving up")
             if pkt.type is not PacketType.START:
                 continue
 
             info = pk.StartPayload.from_payload(pkt.payload)
-            self.run_id = info.run_id or self.run_id
-            self.log = EventLog(self.run_id, "receiver", log_dir=self.log_dir)
+            self._open_log(info.run_id or self.run_id)
             self.requested_mode = info.mode
             # A hybrid transfer starts in config.DEFAULT_MODE. Both endpoints
             # read the same config, so the starting mode needs no field on the
@@ -260,6 +286,9 @@ class Receiver:
         while True:
             pkt, source = self._receive(self.idle_timeout)
             if pkt is None:
+                self._log("TIMEOUT", sequence=transfer.expected_seq,
+                          reason=(f"RECEIVE;idle {self.idle_timeout:.1f}s;"
+                                  f"written={self.writer.segments_written}"))
                 raise ReceiverError(
                     f"idle for {self.idle_timeout:.0f}s with "
                     f"{self.writer.segments_written} segments written — giving up")
@@ -269,7 +298,9 @@ class Receiver:
                 result = strategy.on_data(pkt.seq, pkt.payload)
                 for seq, payload in result.deliver:
                     if self.writer.write(seq, payload):
-                        self._log("DELIVER", sequence=seq)
+                        # The payload byte count is what makes delivered bytes,
+                        # and therefore goodput, derivable from the log (CC-06).
+                        self._log("DELIVER", sequence=seq, size_bytes=len(payload))
                     else:
                         # The strategy thought this was new but the writer had
                         # already committed it. The writer is the authority.
@@ -407,9 +438,9 @@ class Receiver:
 
         # Linger briefly: if this FIN_ACK is lost the sender repeats its FIN,
         # and answering is much cheaper than letting it fail a completed transfer.
-        deadline = time.monotonic() + self.linger
-        while time.monotonic() < deadline:
-            pkt, source = self._receive(max(0.0, deadline - time.monotonic()))
+        deadline = time.perf_counter() + self.linger
+        while time.perf_counter() < deadline:
+            pkt, source = self._receive(max(0.0, deadline - time.perf_counter()))
             if pkt is not None and pkt.type is PacketType.FIN:
                 self._send(fin_ack, source or address)
                 self._log("FIN_ACK", reason="REPEAT")
@@ -418,7 +449,7 @@ class Receiver:
     # -- entry point -------------------------------------------------------
 
     def run(self) -> dict:
-        started = time.monotonic()
+        started = time.perf_counter()
         error = None
         verdict = None
         try:
@@ -437,23 +468,51 @@ class Receiver:
             self.state = "ERROR"
             self._log("ERROR", reason=error)
         finally:
-            elapsed = time.monotonic() - started
+            elapsed = time.perf_counter() - started
             if self.writer is not None:
                 self.writer.close()
             metrics = self._metrics(elapsed, error)
-            if self.log is not None:
-                self.log.write_summary(metrics, extra={
-                    "output": str(self.output),
-                    "expected_sha256": self.start_info.sha256 if self.start_info else None,
-                    "final_state": self.state,
-                    "impairment": self.impairment.as_dict(),
-                })
-                self.log.close()
+            if self.log is None:
+                # No START ever arrived, so nothing named the run. A run that
+                # produced no log at all could not be explained afterwards, so
+                # one is opened under the fallback run id and whatever was
+                # observed — the idle timeout, any rejected packet — is written
+                # out (T6.1, M8: a log for *every* run, with no manual steps).
+                self._open_log(self.run_id)
+            self.log.write_summary(metrics, config_overrides=self._run_config(), extra={
+                "output": str(self.output),
+                "expected_sha256": self.start_info.sha256 if self.start_info else None,
+                "final_state": self.state,
+                "impairment": self.impairment.as_dict(),
+            })
+            self.log.close()
             self.sock.close()
 
         if error:
             raise ReceiverError(error)
         return metrics
+
+    def _run_config(self) -> dict:
+        """What this receiver actually ran under, for summary.json (T6.3).
+
+        The receiver carries the ACK half of the emulated round trip and learns
+        the file size from START, so both differ from the module defaults.
+        """
+        impairment = self.impairment
+        return {
+            "port": self.port,
+            "window_size": self.window_size,
+            "receiver_idle_timeout_s": self.idle_timeout,
+            "random_seed": impairment.seed,
+            "loss_rate": impairment.loss_rate,
+            "ack_loss_rate": impairment.recv_loss_rate,
+            "rtt_ms": impairment.delay_ms * 2.0,
+            "jitter_ms": impairment.jitter_ms,
+            "loss_schedule": [list(step) for step in impairment.loss_schedule],
+            "transfer_file_size_bytes": (self.start_info.filesize
+                                         if self.start_info else None),
+            "default_mode": config.DEFAULT_MODE,
+        }
 
     def _metrics(self, elapsed: float, error: str | None) -> dict:
         written = self.writer.bytes_written if self.writer else 0
