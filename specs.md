@@ -441,9 +441,37 @@ recorded in this section, and marked Frozen in `design.md` §12.
     unacknowledged segment can be lost in the rebuild (HY-05). Cost, stated because it is
     real: each switch stalls the pipe for roughly one RTT, which is exactly what the
     `fixed-hybrid` control measures.
-13. Experiment repetition count.
-14. Random-loss seed policy.
-15. File size(s).
+13. ✅ **FROZEN (T8.1, D12)** — Experiment repetition count: **5 trials per cell**, identical
+    for every system in that cell. Rationale: §20 is reported per condition with the spread
+    across trials (T9.1), and a spread over three runs says little about whether a
+    difference between systems is real. Five was chosen against the measured cost of the
+    matrix rather than as a round number: a pilot of one trial of E1 and one of E6 at the
+    frozen file size and 100 ms RTT took 16.2 s per clean run and 137.1 s for the slowest
+    (GBN at 20% loss), which puts the full matrix at roughly two hours for five trials —
+    affordable, where the ten trials that would tighten the interval further is not. The
+    count is recorded in every experiment config and in `summary.json`.
+14. ✅ **FROZEN (T8.1, D13)** — Random-seed policy: **one base seed per experiment config**,
+    recorded in the config and in every `summary.json`, with each trial's seed derived from
+    it as `sha256(base_seed/experiment/condition/trial)`, truncated to 32 bits. Implemented
+    as `experiments.run_experiment.derive_seed`. Rationale, in three parts, because each one
+    is a property something else depends on: **derived rather than sequential**, so two
+    conditions cannot land on overlapping impairment streams by accident; **deterministic**,
+    so the entire matrix replays from one recorded number (RP-03); and **the system is not
+    an input**, so GBN, SR and Hybrid within one cell meet the byte-identical drop sequence
+    — which is what makes the comparison controlled rather than three unrelated sets of runs
+    (RP-04). A test asserts the last property, since it is invisible in any single run.
+15. ✅ **FROZEN (T8.1, D14)** — File size: **one size for the whole matrix, 1 MiB**
+    (1024 segments of 1024 B). Rationale: the controller needs roughly 110 acknowledged
+    segments to confirm a change — a 50-outcome estimator window plus three confirmations at
+    20 segments (§16.9, §16.11) — so a transfer has to be several times that for adaptation
+    to be observable at all. 1024 segments holds about nine such windows; the 256 KiB file
+    used for calibration held barely two and never returned to GBN within one transfer
+    (`experiments/results/calibration.md` §5). At the other end, the slowest cell measured —
+    GBN at 20% loss, 100 ms RTT — completes in 137 s at this size, inside the 300 s abort
+    timeout with margin. The second, larger size that `design.md` §12 proposed as "10 MiB if
+    time allows" is **not** run and is reported as not run (T10.4): at the measured rate a
+    10 MiB transfer at 20% loss would take about 23 minutes per run and would dominate the
+    matrix without changing what any cell of it says.
 
 ## 17. Network Impairment
 

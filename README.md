@@ -19,8 +19,37 @@ global novelty (`specs.md` §30).
 
 ## Status
 
-**Phase 4 complete (M5, M6)** — both ARQ baselines exist and are tested under
-controlled loss. 397 tests pass.
+**Phase 8 complete (M9)** — the experimental matrix of `specs.md` §19 has been run:
+**195 transfers, every one with a matching hash**, recorded in
+[`experiments/results/experiment_runs.csv`](experiments/results/experiment_runs.csv) and
+written up in [`experiments/results/experiments.md`](experiments/results/experiments.md).
+563 tests pass.
+
+Headline, 1 MiB over loopback at 100 ms RTT, five trials per cell, identical seed and file
+across systems within each cell:
+
+| loss | GBN | SR | Hybrid | hybrid ÷ GBN | hybrid ÷ SR | switches |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0% | 16.2 s | 16.2 s | 16.2 s | 1.00 | 1.00 | 0.0 |
+| 1% | 20.9 s | 19.6 s | 21.4 s | 0.98 | 0.92 | 5.0 |
+| 5% | 42.5 s | 32.0 s | 33.3 s | 1.27 | 0.96 | 1.4 |
+| 20% | 139.6 s | 64.6 s | 69.8 s | **2.00** | 0.93 | 1.0 |
+
+Three things that matrix settled, and one it exposed:
+
+- **The hybrid doubles pure GBN's throughput at 20% loss** and stays within 4–9% of pure SR.
+  It never beats SR: it starts in GBN and has to earn the evidence to leave.
+- **The switching decision is RTT-invariant** across 10/50/100/500 ms (E7) — an advantage of
+  1.22–1.25× over GBN at every RTT. The calibration argued this from the estimator's
+  definition; E7 measured it.
+- **The MODE drain costs ≈0.17 s, about 1.5 RTT**, measured directly by the `fixed-hybrid`
+  control, which performs the same handshakes while changing no mode.
+- **It oscillates at 1–2% loss** — 5.0 switches where one is justified, and at 1% loss it is
+  worse than both baselines. At the same physical loss the estimator reads 0.16–0.30 under
+  GBN and 0.00 under SR, so the dead band sits *between* the two modes' scales instead of
+  separating them. The 256 KiB calibration transfers ended before a second crossing could
+  form. D9 stays frozen — changing it invalidates every recorded run — and this is reported
+  as a limitation, not patched away.
 
 `network/simulator.py` injects loss, one-way delay and jitter from a seeded RNG, so a
 condition replays exactly from a recorded seed. `protocol/sr.py` implements Selective
@@ -43,12 +72,13 @@ thresholds with hysteresis, and decides. It never performs the switch itself —
 endpoints drain the window and negotiate a MODE handshake, because GBN and SR disagree
 about what an ACK means and no packet may ever be read under the wrong convention.
 
-Frozen so far: **D1** byte layout, **D2** checksum coverage, **D3** segment size,
-**D4** sequence convention, **D5** GBN ACK semantics, **D6** SR ACK semantics,
-**D7** baseline RTO, **D8** loss estimator, **D9** switching thresholds, **D10** transition
-mechanism, **D11** window size. Only the experiment-scale decisions (D12–D14: trial count,
-seed policy, file size) remain, and T8.1 settles them. Next up is **Phase 8 (T8.1–T8.7):
-the experiment sweep**.
+**Every decision D1–D14 is now frozen**: **D1** byte layout, **D2** checksum coverage,
+**D3** segment size, **D4** sequence convention, **D5** GBN ACK semantics, **D6** SR ACK
+semantics, **D7** baseline RTO, **D8** loss estimator, **D9** switching thresholds,
+**D10** transition mechanism, **D11** window size, and — settled at T8.1 against a measured
+pilot rather than against their standing recommendation — **D12** five trials per cell,
+**D13** the seed policy, **D14** a 1 MiB transfer for the whole matrix. Next up is
+**Phase 9 (T9.1–T9.5): analysis, graphs and the Wireshark evidence set**.
 
 D9 was calibrated rather than guessed — 444 recorded transfers, written up in
 [`experiments/results/calibration.md`](experiments/results/calibration.md). Three findings
@@ -58,8 +88,10 @@ worth knowing before reading any hybrid result:
   over-reads loss under GBN by four to five times, because one drop resends the whole
   window, so `SWITCH_HIGH = 0.10` fires at about 2% physical loss.
 - **The hybrid never beats pure SR under sustained static loss** — it starts in GBN and must
-  earn the evidence to leave. It beats GBN from 2% loss upward (to 1.32×) and completed
-  every 20%-loss trial where pure GBN exhausted its retry budget and aborted.
+  earn the evidence to leave. It beats GBN from 2% loss upward (to 1.32× there, 2.00× in the
+  Phase 8 matrix) and completed every 20%-loss trial where pure GBN exhausted its retry
+  budget and aborted — though at the larger Phase 8 file size and 100 ms RTT, GBN aborted
+  nothing, so that last claim does not generalise.
 - **The hysteresis count is the only real lever on oscillation**, and only a condition that
   *changes* can calibrate it. A count of 1 scored best under static and falling loss; under
   an alternating condition it made 60% more switches than the condition justified.
@@ -69,6 +101,15 @@ The logs are the deliverable as much as the code, so they are audited rather tha
 it agrees with what the endpoints computed while they ran. Every run records the
 configuration it actually used — seed, impairment, derived RTO, file size, thresholds — with
 the freeze state of each decision and the commit that produced it.
+
+Running the matrix, or one cell of it:
+
+```bash
+python experiments/run_experiment.py --all --resume        # E1-E8, skipping what is recorded
+python experiments/run_experiment.py --config experiments/configs/E4.json
+python experiments/run_experiment.py --all --dry-run       # print the plan, run nothing
+python experiments/run_experiment.py --verify              # integrity + raw-log fingerprints
+```
 
 See the status snapshot in `tasks.md` for the current milestone map.
 
@@ -180,9 +221,9 @@ network/
 experiments/
   calibrate_thresholds.py  the D9 calibration sweep                ✅
   results/             recorded calibration evidence (T7.2)        ✅
-  run_experiment.py    automated runs                              (T8.2)
+  run_experiment.py    automated runs, E1–E8 matrix                ✅
   analyze_results.py   aggregation, metrics, graphs                (T9.*)
-  configs/             per-experiment configuration (E1–E8)        (T8.3)
+  configs/             per-experiment configuration (E1–E8)        ✅
 eventlog.py            events.csv / summary.json emitter            ✅
 metrics.py             specs.md §20 derived from events.csv alone   ✅
 logs/  captures/  plots/   run output — git-ignored, regenerated by script

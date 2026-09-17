@@ -1,0 +1,22 @@
+{
+  "experiment": "E6",
+  "description": "Very high loss (20%) at 100 ms RTT, specs.md 19 row E6.",
+  "systems": [
+    "gbn",
+    "sr",
+    "hybrid",
+    "fixed-hybrid"
+  ],
+  "trials": 5,
+  "file_size_bytes": 1048576,
+  "base_seed": 20260917,
+  "abort_timeout_s": 300.0,
+  "conditions": [
+    {
+      "name": "loss20",
+      "description": "Very high: 20% forward DATA loss, specs.md 17.1.",
+      "loss_rate": 0.2,
+      "rtt_ms": 100.0
+    }
+  ]
+}

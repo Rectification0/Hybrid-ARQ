@@ -598,14 +598,34 @@ Design rules:
 `experiments/run_experiment.py` reads a config from `experiments/configs/` and, for each
 cell of the matrix (specs.md §19) × system (GBN / SR / Hybrid) × trial:
 
-1. Derive `run_id` (e.g. `E4_hybrid_trial03`) and a per-trial seed from a recorded base seed.
+1. Derive `run_id` (`E4_hybrid_loss05_trial03`) and a per-trial seed from a recorded base
+   seed (D13).
 2. Launch the receiver, wait for its socket to bind, then launch the sender.
 3. Wait for completion or the abort timeout; record exit status and integrity result.
 4. Copy the frozen config into `summary.json`.
 
 The same generated source file, segment size, initial window, transport, and impairment
 procedure are used across all three systems within a cell — otherwise the comparison is not
-fair (specs.md §18).
+fair (specs.md §18). The seed is derived from the condition and trial only, never from the
+system, which is what makes that identity hold for the *drop sequence* and not merely for
+the settings.
+
+Two things the implementation settled that this section originally left open:
+
+- **The two endpoints are subprocesses**, driven through their own command lines, where
+  `calibrate_thresholds.py` runs its transfers in process. The sweep chose speed because it
+  is several hundred short transfers; the published matrix chooses fidelity — a reader runs
+  the CLI, not a library call — and, decisively, an abort timeout can only be *enforced*
+  against a process. An in-process transfer that hangs cannot be abandoned without killing
+  the runner with it, and specs.md §13 requires the run to be abandoned and reported.
+- **The runner keeps an index, not a copy.** `experiments/results/experiment_runs.csv` holds
+  one row per run, every metric re-derived from that run's `events.csv` by `metrics.py`, plus
+  the SHA-256 of both raw event logs. `--verify` recomputes those hashes, so a log that was
+  edited, truncated or regenerated between the run and the analysis is a reported mismatch
+  rather than a silent one (RP-07, T8.7). The raw logs themselves are never rewritten.
+- A run's status distinguishes `ok` from `integrity`, `failed` and `aborted`. A transfer
+  whose hashes did not match is never recorded as `ok`, whatever the sender's exit code
+  said (CC-01).
 
 `experiments/analyze_results.py` loads all `events.csv`/`summary.json` with pandas,
 aggregates per condition (mean plus spread across trials, not a single run), and emits the
@@ -640,9 +660,13 @@ throughput.
 | D9 | Thresholds / hysteresis | HIGH 0.10, LOW 0.02, count 3, cadence 20 acked segments, min residence 1 s | **Frozen** (T7.2) |
 | D10 | Transition mechanism | MODE handshake at a quiescent window, epoch-guarded, abandoned on retry exhaustion | **Frozen** (T5.4) |
 | D11 | Primary window size | 8 (source spec default) | **Frozen** (T4.9) |
-| D12 | Repetition count | 5 trials per cell | Proposed |
-| D13 | Seed policy | Recorded base seed, derived per trial | Proposed |
-| D14 | File size(s) | 1 MiB primary; 10 MiB secondary if time allows | Proposed |
+| D12 | Repetition count | 5 trials per cell | **Frozen** (T8.1) |
+| D13 | Seed policy | One recorded base seed; `sha256(base/experiment/condition/trial)` per trial, system not an input | **Frozen** (T8.1) |
+| D14 | File size(s) | 1 MiB for the whole matrix; the proposed 10 MiB second size was not run | **Frozen** (T8.1) |
 
 Each of these maps to an item in specs.md §16 and must be marked frozen — in code and in
-`specs.md` — before the final experiment sweep begins.
+`specs.md` — before the final experiment sweep begins. **All fourteen are now frozen.**
+D12-D14 were settled at T8.1 against a measured pilot of the matrix (one trial of E1 and one
+of E6 at 1 MiB and 100 ms RTT: 16.2 s clean, 137.1 s for GBN at 20% loss with 2112
+retransmissions, 67.9 s for SR with 264), not against the recommendations they carried here
+— which is why D14's second file size is recorded as *not run* rather than quietly dropped.

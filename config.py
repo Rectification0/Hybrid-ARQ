@@ -153,10 +153,53 @@ LOSS_SCHEDULE = None        # step function for dynamic conditions, E8 (§17.3)
 
 RANDOM_SEED = 0             # per trial; derived by the runner and recorded (RP-03)
 
-# Experiment scale — all three still open (specs.md §16.13-§16.15).
-TRIAL_COUNT = 5             # NOT FROZEN — D13, frozen by T8.1
-TRANSFER_FILE_SIZE_BYTES = 1 * 1024 * 1024   # NOT FROZEN — D14, frozen by T8.1
-EXPERIMENT_ABORT_TIMEOUT_S = 300.0           # NOT FROZEN — frozen by T8.2
+# ---------------------------------------------------------------------------
+# Experiment scale (specs.md §16.13-§16.15 — decisions D12, D13, D14)
+# ---------------------------------------------------------------------------
+#
+# Frozen at T8.1 against a measured pilot of the matrix rather than a guess: one
+# trial of E1 and of E6 at 1 MiB and 100 ms RTT, which is the cheapest and the
+# most expensive cell of the loss sweep. Clean took 16.2 s for every system; at
+# 20% loss GBN took 137.1 s with 2112 retransmissions and SR 67.9 s with 264.
+# Those three numbers set all three decisions below, and they are recorded in
+# specs.md §16.13-§16.15 with the reasoning.
+
+# Trials per cell (D12). Five, not three: T9.1 reports spread across trials, and
+# the spread is what says whether a difference between systems is real. Five
+# trials of the full matrix costs roughly two hours on this bed at the measured
+# times above — affordable, where the 10 trials that would tighten the interval
+# further is not.
+TRIAL_COUNT = 5                                     # FROZEN — D12 (T8.1)
+
+# Seed policy (D13): one base seed per experiment config, recorded there and in
+# every summary.json, with each trial's seed derived from it by SHA-256 over
+# ``base/experiment/condition/trial``. Implemented as
+# experiments.run_experiment.derive_seed. The *system* is deliberately not an
+# input, so GBN, SR and Hybrid in one cell meet the identical drop sequence
+# (RP-04); derivation rather than a sequence keeps two conditions from sharing a
+# stream by accident, and keeps the whole matrix replayable from one number
+# (RP-03). The value below is only the module default for a manual run — an
+# experiment's seed always comes from its config.
+RANDOM_SEED_POLICY = "sha256(base_seed/experiment/condition/trial)"  # FROZEN — D13 (T8.1)
+
+# Transfer size (D14). One size for the whole matrix: 1 MiB = 1024 segments.
+# Large enough that the hybrid has room to act — the controller needs about 110
+# acknowledged segments to confirm a change (50-outcome window + 3 confirmations
+# at 20 segments), so 1024 segments holds roughly nine such windows, where the
+# 256 KiB file used for calibration held barely two and never returned to GBN
+# within a transfer. Small enough that the worst cell measured, GBN at 20% loss,
+# finishes in 137 s — inside the abort timeout with margin to spare. The second,
+# larger size that design.md §12 proposed is **not** run: at the measured rate a
+# 10 MiB transfer at 20% loss would take about 23 minutes per run and would
+# dominate the matrix without changing what any cell of it says (T10.4).
+TRANSFER_FILE_SIZE_BYTES = 1 * 1024 * 1024          # FROZEN — D14 (T8.1)
+
+# Abort timeout for one run (T8.2, specs.md §13, RP-06). 300 s is a little over
+# twice the slowest transfer measured (137 s), so it catches a transfer that has
+# genuinely stopped making progress without cutting off one that is merely slow
+# because its condition is severe — which at 20% loss is the honest result, not
+# a failure.
+EXPERIMENT_ABORT_TIMEOUT_S = 300.0                  # FROZEN — T8.2
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +260,7 @@ def _defaults() -> dict:
         "jitter_ms": JITTER_MS,
         "loss_schedule": LOSS_SCHEDULE,
         "random_seed": RANDOM_SEED,
+        "random_seed_policy": RANDOM_SEED_POLICY,
         "trial_count": TRIAL_COUNT,
         "transfer_file_size_bytes": TRANSFER_FILE_SIZE_BYTES,
     }
@@ -241,16 +285,17 @@ _DECISIONS = (
      "experiments/results/calibration.md", "switch_high"),
     ("D10", "mode transition mechanism", "T5.4", "sender.py / receiver.py", None),
     ("D11", "primary window size", "T4.9", "config.WINDOW_SIZE", "window_size"),
+    ("D12", "experiment repetition count", "T8.1", "config.TRIAL_COUNT", "trial_count"),
+    ("D13", "random-seed policy", "T8.1",
+     "experiments/run_experiment.py derive_seed()", "random_seed_policy"),
+    ("D14", "file size(s)", "T8.1", "config.TRANSFER_FILE_SIZE_BYTES",
+     "transfer_file_size_bytes"),
 )
 
-#: Still open, with the task that closes each. All three are experiment *scale*
-#: decisions rather than protocol behaviour, which is why they can wait for T8.1:
-#: nothing already measured changes when they are settled.
-_OPEN_DECISIONS = (
-    ("D12", "experiment repetition count", "T8.1"),
-    ("D13", "random-seed policy", "T8.1"),
-    ("D14", "file size(s)", "T8.1"),
-)
+#: Nothing is open. D12-D14 were the last three, and T8.1 closed them against a
+#: measured pilot of the matrix rather than against the recommendation they
+#: carried since design.md was written.
+_OPEN_DECISIONS = ()
 
 
 def frozen_decisions(overrides: dict | None = None) -> dict:

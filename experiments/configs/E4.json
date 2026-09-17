@@ -1,0 +1,22 @@
+{
+  "experiment": "E4",
+  "description": "Moderate loss (5%) at 100 ms RTT, specs.md 19 row E4.",
+  "systems": [
+    "gbn",
+    "sr",
+    "hybrid",
+    "fixed-hybrid"
+  ],
+  "trials": 5,
+  "file_size_bytes": 1048576,
+  "base_seed": 20260917,
+  "abort_timeout_s": 300.0,
+  "conditions": [
+    {
+      "name": "loss05",
+      "description": "Moderate: 5% forward DATA loss, specs.md 17.1.",
+      "loss_rate": 0.05,
+      "rtt_ms": 100.0
+    }
+  ]
+}

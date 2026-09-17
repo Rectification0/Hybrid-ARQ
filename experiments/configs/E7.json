@@ -1,0 +1,39 @@
+{
+  "experiment": "E7",
+  "description": "Fixed 5% loss, RTT swept over 10/50/100/500 ms (specs.md 17.2, 19 row E7). The RTO is derived per condition by D7, so each cell keeps the three systems comparable within itself.",
+  "systems": [
+    "gbn",
+    "sr",
+    "hybrid"
+  ],
+  "trials": 5,
+  "file_size_bytes": 1048576,
+  "base_seed": 20260917,
+  "abort_timeout_s": 300.0,
+  "conditions": [
+    {
+      "name": "rtt010",
+      "description": "5% forward DATA loss at 10 ms RTT.",
+      "loss_rate": 0.05,
+      "rtt_ms": 10.0
+    },
+    {
+      "name": "rtt050",
+      "description": "5% forward DATA loss at 50 ms RTT.",
+      "loss_rate": 0.05,
+      "rtt_ms": 50.0
+    },
+    {
+      "name": "rtt100",
+      "description": "5% forward DATA loss at 100 ms RTT.",
+      "loss_rate": 0.05,
+      "rtt_ms": 100.0
+    },
+    {
+      "name": "rtt500",
+      "description": "5% forward DATA loss at 500 ms RTT.",
+      "loss_rate": 0.05,
+      "rtt_ms": 500.0
+    }
+  ]
+}

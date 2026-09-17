@@ -1,0 +1,61 @@
+{
+  "experiment": "E8",
+  "description": "Dynamic loss at 100 ms RTT (specs.md 17.3, 19 row E8): loss rising mid-transfer, loss falling mid-transfer, and an irregular schedule crossing the dead band repeatedly. The adaptive system is the one under test, so the hybrid runs alone here; its fixed comparators at the same loss levels are E1-E6. Step times are chosen against the measured length of a 1 MiB transfer on this bed (16 s clean, 68-137 s at 20% loss), so every step is reached before the transfer ends.",
+  "systems": [
+    "hybrid"
+  ],
+  "trials": 5,
+  "file_size_bytes": 1048576,
+  "base_seed": 20260917,
+  "abort_timeout_s": 300.0,
+  "conditions": [
+    {
+      "name": "loss_rise",
+      "description": "Clean, then 10% loss from 8 s: the transfer starts in GBN (config.DEFAULT_MODE) and has to detect the change and enter SR.",
+      "loss_rate": 0.0,
+      "rtt_ms": 100.0,
+      "loss_schedule": [
+        [
+          8.0,
+          0.1
+        ]
+      ]
+    },
+    {
+      "name": "loss_fall",
+      "description": "10% loss, then clean from 20 s: the return to GBN, which no static condition exercises at all. The hysteresis count of 3 needs roughly 110 segments of post-change traffic to confirm, so the clean phase is left long enough to contain that (calibration.md 5).",
+      "loss_rate": 0.1,
+      "rtt_ms": 100.0,
+      "loss_schedule": [
+        [
+          20.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "name": "loss_change",
+      "description": "An irregular schedule crossing the crossover four times: 2% -> 12% -> 1% -> 15% -> 2%. This is the condition that separates an adaptive controller from a twitchy one, since a schedule that changes once cannot (calibration.md 3).",
+      "loss_rate": 0.02,
+      "rtt_ms": 100.0,
+      "loss_schedule": [
+        [
+          8.0,
+          0.12
+        ],
+        [
+          20.0,
+          0.01
+        ],
+        [
+          32.0,
+          0.15
+        ],
+        [
+          44.0,
+          0.02
+        ]
+      ]
+    }
+  ]
+}

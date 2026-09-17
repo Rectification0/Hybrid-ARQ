@@ -27,11 +27,11 @@ Per the source document §37, carried forward as the current baseline:
 | SR | ✅ Completed |
 | Loss simulation | ✅ Completed |
 | Hybrid controller | ✅ Completed |
-| Experiment automation | ⏭️ **Next** |
-| Analysis / graphs | ⬜ Not started |
+| Experiment automation | ✅ Completed |
+| Analysis / graphs | ⏭️ **Next** |
 | Final demonstration | ⬜ Not started |
 
-Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ✅ · **M8** ✅ · Phase 7 ✅ · **M9–M11** pending.
+Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ✅ · **M8** ✅ · Phase 7 ✅ · **M9** ✅ · **M10–M11** pending.
 
 ---
 
@@ -274,30 +274,59 @@ where pure GBN aborted one.*
 
 ## Phase 8 — Experiments (M9)
 
-- [ ] **T8.1** Freeze the remaining experimental decisions: repetition count, random-seed
+- [x] **T8.1** Freeze the remaining experimental decisions: repetition count, random-seed
       policy, file size(s).
       **Decides:** D12, D13, D14 · **Satisfies:** §16.13, §16.14, §16.15
-- [ ] **T8.2** Implement `experiments/run_experiment.py`: config-driven runs, `run_id`
+- [x] **T8.2** Implement `experiments/run_experiment.py`: config-driven runs, `run_id`
       generation, per-trial seed derivation, receiver/sender orchestration, abort timeout,
       config capture.
       **Satisfies:** FR-13, §19, RP-01, RP-02
-- [ ] **T8.3** Write `experiments/configs/` for E1–E8, with identical file, segment size,
+- [x] **T8.3** Write `experiments/configs/` for E1–E8, with identical file, segment size,
       window, and impairment procedure across GBN / SR / Hybrid within each cell.
       **Satisfies:** §18, §19, RP-04
-- [ ] **T8.4** Run E1–E6 (loss sweep at fixed RTT) × 3 systems × N trials.
-      **Satisfies:** G-08, §19
-- [ ] **T8.5** Run E7 (fixed loss, RTT sweep 10/50/100/500 ms) × 3 systems.
-      **Satisfies:** §17.2, §19
-- [ ] **T8.6** Run E8 (dynamic loss via `loss_schedule`), hybrid, covering loss-increases,
+- [x] **T8.4** Run E1–E6 (loss sweep at fixed RTT) × 3 systems × N trials.
+      **Satisfies:** G-08, §19 · *120 runs — four systems, since `fixed-hybrid` is what
+      separates adaptation from monitoring overhead.*
+- [x] **T8.5** Run E7 (fixed loss, RTT sweep 10/50/100/500 ms) × 3 systems.
+      **Satisfies:** §17.2, §19 · *60 runs.*
+- [x] **T8.6** Run E8 (dynamic loss via `loss_schedule`), hybrid, covering loss-increases,
       loss-decreases, and random-change.
-      **Satisfies:** §17.3, §19
-- [ ] **T8.7** Verify every run's integrity result; preserve raw logs untouched before any
+      **Satisfies:** §17.3, §19 · *15 runs.*
+- [x] **T8.7** Verify every run's integrity result; preserve raw logs untouched before any
       aggregation.
-      **Satisfies:** IN-05, RP-06, RP-07, CC-01
+      **Satisfies:** IN-05, RP-06, RP-07, CC-01 · *195/195 hashes matched; the index records
+      a SHA-256 per raw event log and `--verify` recomputes all of them.*
 
 **M9 complete when:** baseline and hybrid experiments run reproducibly end to end.
+*Done — 195 runs, every one with a matching hash, written up in
+`experiments/results/experiments.md` with `experiment_runs.csv` as the record. D12 (5 trials),
+D13 (one base seed, per-trial derivation, system deliberately not an input) and D14 (1 MiB for
+the whole matrix) were frozen against a measured pilot rather than against the recommendation
+they had carried since design.md was written — which is also why D14's proposed 10 MiB second
+size is recorded as **not run**, with the reason, instead of quietly dropped. All fourteen
+decisions are now frozen.*
+
+*Four results the matrix produced that the calibration could not:*
+
+1. *The hybrid reaches **2.00× pure GBN at 20% loss** and stays within 4–9% of pure SR — but
+   **never beats SR** in any of the ten static cells.*
+2. *The switching decision is **RTT-invariant** across a fiftyfold sweep (1.22–1.25× GBN at
+   every RTT), which the calibration argued from the estimator's definition but could not
+   measure.*
+3. ***The hybrid oscillates at 1% and 2% loss** — 5.0 and 4.4 switches where one is justified,
+   and at 1% it is worse than both baselines. The estimator reads 0.16–0.30 under GBN and 0.00
+   under SR at the same physical loss, so the dead band sits *between* the two modes' scales
+   rather than separating them. The 256 KiB calibration transfers ended before a second
+   crossing could form; the frozen 1 MiB transfer shows it. D9 stays frozen — changing it
+   invalidates 444 calibration transfers and all 195 runs here — and this is recorded as a
+   limitation for T10.4.*
+4. *The MODE drain costs **≈0.17 s, about 1.5 RTT**, measured directly by the `fixed-hybrid`
+   control, which performs the same handshakes while changing nothing.*
 
 ## Phase 9 — Analysis, graphs, captures (M10)
+
+The data is already recorded: `experiments/results/experiment_runs.csv` (195 runs) and the raw
+logs under `logs/experiments/`. Phase 9 reads them and never re-runs them (RP-07).
 
 - [ ] **T9.1** Implement `experiments/analyze_results.py`: load all runs with pandas,
       aggregate per condition with across-trial spread, exclude integrity failures from
