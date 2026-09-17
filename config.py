@@ -113,8 +113,9 @@ LOSS_WINDOW_SIZE = 50       # FROZEN — D8 (T5.2)
 # Dual thresholds with a dead band, on the *estimator's* scale rather than the
 # physical loss rate — D8 over-reads loss under GBN, so these are not loss
 # percentages (specs.md §16.9, §16.10). Calibrated by the recorded sweep in
-# experiments/results/: 418 transfers over the §17.1 loss grid, a falling-loss
-# schedule and an oscillating one. Evidence and cost in calibration.md.
+# experiments/results/: 444 transfers in five stages — the §17.1 loss grid
+# (entry), a falling-loss schedule (exit), an oscillating one (flap), a
+# confirmation pass and an RTT check. Evidence and cost in calibration.md.
 SWITCH_HIGH = 0.10          # FROZEN — D9 (T7.2), enter SR above this
 SWITCH_LOW = 0.02           # FROZEN — D9 (T7.2), return to GBN below this
 
