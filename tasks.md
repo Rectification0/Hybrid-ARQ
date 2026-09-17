@@ -30,8 +30,9 @@ Per the source document §37, carried forward as the current baseline:
 | Experiment automation | ✅ Completed |
 | Analysis / graphs | ✅ Completed |
 | Final demonstration | ✅ Completed |
+| Frontend dashboard | ⏭️ **Next** |
 
-Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ✅ · **M8** ✅ · Phase 7 ✅ · **M9** ✅ · **M10** ✅ · **M11** ✅ — **all phases complete**.
+Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ✅ · **M8** ✅ · Phase 7 ✅ · **M9** ✅ · **M10** ✅ · **M11** ✅ · **M12** ⬜ — the protocol project is complete; Phase 11 adds a presentation layer over it.
 
 ---
 
@@ -421,6 +422,199 @@ for the mechanism.*
 
 ---
 
+## Phase 11 — Frontend / interactive dashboard (M12)
+
+**The frontend is a presentation and control layer over the finished system. It is not a
+replacement for the CLI, the protocol modules, the experiment runner or Wireshark**, and the
+project stays what it is: a UDP file-transfer protocol with GBN, SR and runtime adaptive
+switching. Phase 11 makes the existing capabilities easy to see; it adds none.
+
+Three rules govern every task below, and each is checkable rather than aspirational:
+
+1. **It reads recorded data.** `events.csv`, `summary.json`, `experiment_runs.csv`,
+   `aggregate.csv` and `plots/` already hold everything the UI shows. A second, incompatible
+   logging path would break CC-06 — the rule that every metric is derivable from the event
+   log alone — by giving the same number two sources that can disagree.
+2. **It never computes protocol behaviour.** The switching policy stays in
+   `protocol/hybrid.py`; the UI visualizes decisions the controller already recorded. A
+   threshold re-evaluated in JavaScript is a second controller, and the two would drift.
+3. **It never fabricates.** No placeholder metric, invented packet, simulated switch or
+   demo-only animation that looks like measured behaviour. Where data does not exist, the UI
+   says so — an empty state is information; a plausible-looking fake is a lie with a
+   stylesheet.
+
+**Decisions taken here are not D-numbered.** D1–D14 are the decisions whose values are baked
+into recorded evidence, so changing one invalidates experiments. A frontend framework choice
+cannot invalidate a transfer that already happened, so frontend decisions are recorded in
+`design.md` §13 with their rationale and are *not* added to `specs.md` §16. For the same
+reason Phase 11 introduces **no new requirement IDs**: it adds no requirement to the
+protocol, so each task cites the existing requirement whose evidence it presents.
+
+### Known gaps in the backend surface, found before planning rather than during
+
+Rule 15 of the phase brief — document a missing capability instead of bending the protocol
+around it. Three exist, and the tasks that hit them say so:
+
+- **Live event data lags by up to 64 rows.** `eventlog.py` flushes every `FLUSH_EVERY = 64`
+  events on purpose: per-event `fsync` would distort the very timings the log exists to
+  measure. A live view therefore tails `events.csv` and is *near*-real-time. **The flush
+  policy must not be changed to make the UI smoother** — that would trade measurement
+  fidelity for animation, which is the wrong way round. T11.4 states the lag in the UI.
+- **The receiver's computed hash is not in its `summary.json`.** It records
+  `expected_sha256` and `integrity_success`, and sends the hash it computed in the FIN_ACK
+  payload, but never writes it down. Showing "source hash vs received hash" side by side
+  (T11.4) therefore needs one field added to the receiver's summary — a *logging* addition
+  of exactly the kind T6.2 made when it added the `bytes` column, not a protocol change, and
+  covered by `test/test_logging.py` when it lands.
+- **Captures exist per scenario, not per run.** `captures/` holds the curated T9.4 evidence
+  set and the demonstration capture, not a capture for every transfer. T11.12 links the
+  relevant recorded capture and says which run it came from; it must not imply that an
+  arbitrary run has one.
+
+- [ ] **T11.1** Choose and freeze the frontend architecture: framework, backend/API
+      mechanism, run command, directory structure, how log and result data reach the UI, how
+      live status is exposed, and how the UI launches the existing sender/receiver/runner.
+      Record it in `design.md` §13 with the rationale.
+      **Done when:** the architecture is documented, protocol responsibilities are unchanged,
+      and every existing CLI command still works exactly as before.
+- [ ] **T11.2** Build the application shell and visual system: header, run status, navigation,
+      cards, status indicators, responsive layout, and a distinct visual treatment per mode
+      (GBN / SR / Hybrid) used consistently everywhere a mode appears.
+      **Done when:** the app opens into a coherent protocol-analysis dashboard with a clear
+      hierarchy and every major section present.
+- [ ] **T11.3** Build the Transfer Control panel: file, host, port, mode, window, loss, RTT,
+      jitter, seed, experiment config; start, stop where safe, reset, validation, disabled and
+      loading states, and a clear indication of whether the backend is reachable.
+      **Satisfies:** presents FR-01, FR-02, §15
+      **Done when:** a valid run can be configured and launched from the UI without editing
+      any source file, and an invalid one is refused with a readable reason rather than a
+      stack trace. Frozen values (segment size, thresholds, RTO policy) are shown as
+      read-only context, never as editable fields.
+- [ ] **T11.4** Build the live Transfer Overview: lifecycle state, filename, size, progress,
+      segments sent and acknowledged, window, current mode, elapsed time, and the integrity
+      result with source and received hashes shown side by side.
+      **Satisfies:** presents FR-11, IN-05, CC-01, §20
+      **Done when:** an evaluator can tell at a glance what the protocol is doing right now;
+      the lifecycle states are the ones `design.md` §7 already defines, not new ones; and the
+      near-real-time lag is stated in the UI rather than hidden.
+- [ ] **T11.5** Build the Adaptive Mode Visualization — the centrepiece. Current and previous
+      mode, switch count, transition timestamps, reason, loss estimate at the transition,
+      epoch, and time spent in each mode, on a timeline.
+      **Satisfies:** presents HY-08, §10, and the `SWITCH` / `MODE` event rows
+      **Done when:** an evaluator can say when and *why* the controller switched, reading only
+      the screen — with the reason taken from the recorded event, never recomputed. A
+      `SWITCH` row whose reason is `FIXED_HYBRID_NOOP` is shown as the control paying the
+      drain cost, not as a mode change.
+- [ ] **T11.6** Build the Network Conditions panel: configured impairment and seed alongside
+      the observed loss estimate, retransmissions and RTT, with sparklines over time.
+      **Satisfies:** presents §17, §10
+      **Done when:** configured impairment and observed measurement are visually distinct and
+      labelled as such. **Simulated loss is never presented as measured physical loss**, and
+      the loss estimate is labelled as a reading of the D8 estimator — which over-reads under
+      GBN by four to five times — not as a loss rate.
+- [ ] **T11.7** Build the Packet / Event Activity view over `events.csv`: the §21 columns,
+      visually distinct event types, filtering by event and mode, search by sequence,
+      auto-scroll and pause.
+      **Satisfies:** presents §21, FR-09
+      **Done when:** an evaluator can trace one segment from `SEND` through `DROP`, `RETX` and
+      `ACK`, and the view reads the existing format with no second log written anywhere.
+- [ ] **T11.8** Build the Retransmission Visualization: a sequence-number timeline with
+      retransmission markers and a mode overlay, making GBN's range retransmission and SR's
+      single-segment retransmission visibly different shapes.
+      **Satisfies:** presents GBN-04, SR-10, §22.1
+      **Done when:** the difference is legible from the picture alone, drawn entirely from
+      recorded `SEND`/`RETX` rows. Nothing is drawn that did not happen.
+- [ ] **T11.9** Build the Metrics Dashboard: every §20 metric with units — goodput,
+      completion time, retransmission count and overhead, integrity, switch count, GBN and SR
+      residence, latency, and the RTT statistics where samples exist.
+      **Satisfies:** presents §20, FR-14
+      **Done when:** a completed run's numbers match what `metrics.py` derives for the same
+      run. Any presentation-only calculation is labelled as one.
+- [ ] **T11.10** Build the GBN vs SR vs Hybrid comparison view over the recorded matrix and
+      the generated figures, including the mode-selection timeline under dynamic loss.
+      **Satisfies:** presents §18, §19, §27
+      **Done when:** an evaluator can compare systems per condition without opening a Python
+      script, reading the same `aggregate.csv` the analysis produced. **Results that reflect
+      badly on the hybrid are shown with the rest** — the 1–2% oscillation and the cells
+      where it loses to SR are part of the result, not an omission.
+- [ ] **T11.11** Build the Experiment History / run browser over `experiment_runs.csv`: run
+      id, mode, condition, RTT, seed, file size, status, completion time, goodput,
+      retransmissions and integrity, each opening into that run's metrics, events, mode
+      timeline, configuration and figures.
+      **Satisfies:** presents RP-01, RP-02, §19
+      **Done when:** any of the 195 recorded runs can be explored from the UI without
+      re-running it, keyed by the recorded `run_id`.
+- [ ] **T11.12** Build the Wireshark companion: current run id, port, the
+      `udp.port == 8888` filter, current mode, relevant retransmission and switch timestamps,
+      a reference to the corresponding capture where one exists, and a concise "what to look
+      for" panel per mode.
+      **Satisfies:** presents WS-01 … WS-09, §22.1
+      **Done when:** the panel moves an evaluator from dashboard to Wireshark, and states
+      plainly which facts come from the logs (controller state, loss estimate, metrics) and
+      which come from the capture (packets on the wire). **It does not claim to inspect
+      packets itself.**
+- [ ] **T11.13** Build the final demonstration mode: the thirteen steps of `specs.md` §28 as
+      a guided flow, with the important transitions prominent and no page-hopping mid-demo.
+      **Satisfies:** §28, G-07 · *`experiments/demonstrate.py` already performs the sequence
+      headlessly and writes a transcript; the UI presents that same run rather than inventing
+      a parallel script.*
+      **Done when:** the project can be demonstrated end to end from one screen while
+      Wireshark stays available for packet-level verification. **No fake events, and no
+      pre-recorded animation presented as live.**
+- [ ] **T11.14** Handle error and edge states: backend unreachable, receiver not running,
+      invalid file or configuration, transfer timeout, transfer failure, hash mismatch,
+      abandoned mode switch, malformed or missing log data, missing results, missing capture.
+      **Satisfies:** presents §13, CC-01
+      **Done when:** every one shows a readable explanation *and* preserves the underlying
+      logged error. A hash mismatch is never softened, and the UI never appears frozen.
+- [ ] **T11.15** Validate the architecture: protocol behaviour still in the protocol modules,
+      switching still in `protocol/hybrid.py`, experiment logic still in `experiments/`,
+      metrics consistent with `metrics.py`, event logs still the only event source, no
+      frontend value presented as a protocol measurement, CLI unchanged, tests passing.
+      **Done when:** **deleting the frontend leaves the protocol's correctness and every
+      recorded experimental result unchanged** — demonstrated, not asserted.
+- [ ] **T11.16** Presentation polish: desktop and laptop layouts, readability from a distance,
+      consistent spacing, loading, empty and error states, chart labels and units, tooltips,
+      no clipped tables, no scrolling during the main demonstration.
+      **Done when:** it reads as a finished protocol-analysis tool, with the primary
+      demonstration screen prioritized over secondary pages.
+- [ ] **T11.17** Document the frontend in `README.md`: purpose, architecture, install, run
+      and startup order, configuration, launching a transfer, viewing results, demo mode, its
+      relationship to Wireshark, and known limitations.
+      **Done when:** a new evaluator can start the system and follow the workflow without
+      reading the source. **The documentation does not claim packet-level inspection the
+      frontend does not perform.**
+
+### Frontend definition of done
+
+- [ ] A polished dashboard is available.
+- [ ] GBN, SR and Hybrid can be selected where supported.
+- [ ] Transfer configuration is available through the UI.
+- [ ] Transfer progress is visible.
+- [ ] The current ARQ mode is clearly displayed.
+- [ ] GBN to SR and SR to GBN transitions are clearly visualized.
+- [ ] Switching reasons come from recorded controller events.
+- [ ] Network-condition information is visualized, with configured and observed kept distinct.
+- [ ] Retransmission activity is visualized from recorded events.
+- [ ] Event logs can be inspected.
+- [ ] Metrics are displayed from recorded data and agree with `metrics.py`.
+- [ ] GBN / SR / Hybrid results can be compared.
+- [ ] Previous runs can be browsed.
+- [ ] Integrity and hash status is clearly displayed.
+- [ ] Wireshark evidence is connected to its run without being replaced.
+- [ ] The final demonstration can be presented coherently from the frontend.
+- [ ] Error states are handled clearly.
+- [ ] Existing protocol tests still pass.
+- [ ] The existing CLI workflow still works.
+- [ ] The frontend does not modify protocol semantics.
+- [ ] No fabricated metric, packet, switch or experimental result appears anywhere.
+
+**M12 complete when:** the existing implementation can be controlled, monitored, visualized
+and demonstrated through the frontend while the protocol, experiments, logging, metrics and
+Wireshark behaviour are exactly what they were before Phase 11 began.
+
+---
+
 ## Milestone reference
 
 | Milestone | Completion condition | Tasks |
@@ -436,6 +630,7 @@ for the mechanism.*
 | M9 Evaluation | Baseline and hybrid experiments run reproducibly | T8.1–T8.7 |
 | M10 Visualization | Graphs and Wireshark captures demonstrate behavior | T9.1–T9.5 |
 | M11 Finalization | Code, tests, results, documentation, presentation complete | T10.1–T10.7 |
+| M12 Frontend | The finished system can be driven and demonstrated from a dashboard | T11.1–T11.17 |
 
 ## Immediate next steps
 
@@ -452,3 +647,4 @@ The source specification's implementation sequence (§41), mapped to task IDs:
 9. **Only then** T5.* — hybrid switching.
 10. T8.* — automated experiment execution.
 11. T9.* — analysis and visualization.
+12. T11.* — the frontend, which presents all of the above and changes none of it.
