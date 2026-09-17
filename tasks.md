@@ -29,9 +29,9 @@ Per the source document §37, carried forward as the current baseline:
 | Hybrid controller | ✅ Completed |
 | Experiment automation | ✅ Completed |
 | Analysis / graphs | ✅ Completed |
-| Final demonstration | ⏭️ **Next** |
+| Final demonstration | ✅ Completed |
 
-Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ✅ · **M8** ✅ · Phase 7 ✅ · **M9** ✅ · **M10** ✅ · **M11** pending.
+Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ✅ · **M8** ✅ · Phase 7 ✅ · **M9** ✅ · **M10** ✅ · **M11** ✅ — **all phases complete**.
 
 ---
 
@@ -373,28 +373,51 @@ things the figures say that the tables did not:*
 
 ## Phase 10 — Finalization (M11)
 
-- [ ] **T10.1** Write `README.md`: install, run sender/receiver, reproduce an experiment,
+- [x] **T10.1** Write `README.md`: install, run sender/receiver, reproduce an experiment,
       regenerate graphs.
-- [ ] **T10.2** Record every frozen decision from `specs.md` §16 with its final value and the
+      *Setup moved above the run instructions, since a reader needs it first; a
+      **Reproducing the results** section covers the matrix, the aggregate and graphs, the
+      capture set and the demonstration, one command each.*
+- [x] **T10.2** Record every frozen decision from `specs.md` §16 with its final value and the
       rationale; update `design.md` §12 from Proposed to Frozen.
       **Satisfies:** §29 ("all major configuration choices are documented")
-- [ ] **T10.3** Write up the results against hypotheses H-01 … H-05, stating explicitly which
+      *All fourteen carry their value and the rationale recorded **at freeze time**. The
+      DECISION blocks in the body of `design.md` now carry the same marker as the §12 table,
+      so a reader arriving mid-document is not left thinking a settled decision is still a
+      proposal.*
+- [x] **T10.3** Write up the results against hypotheses H-01 … H-05, stating explicitly which
       were supported and which were not.
-      **Satisfies:** §26
-- [ ] **T10.4** Document known limitations and failed experiments, including the loss
+      **Satisfies:** §26 · *`RESULTS.md` §1. All five supported — but H-05 was supported by
+      the shipped configuration rather than by a deliberately bad one, which is a sharper
+      result than the hypothesis anticipated.*
+- [x] **T10.4** Document known limitations and failed experiments, including the loss
       estimator's GBN bias and the per-switch drain cost.
-      **Satisfies:** §29
-- [ ] **T10.5** State the research positioning: implementation and evaluation, with no claim of
+      **Satisfies:** §29 · *`RESULTS.md` §2, including the one the project would most like to
+      forget: the dead band sits **between the two modes' scales** rather than between two
+      loss levels, which is why the hybrid oscillates at 1–2% loss and why widening the band
+      would not fix it.*
+- [x] **T10.5** State the research positioning: implementation and evaluation, with no claim of
       global novelty (`specs.md` §30).
-      **Satisfies:** §3, §30
-- [ ] **T10.6** Rehearse the final demonstration end to end, in order, per `specs.md` §28:
+      **Satisfies:** §3, §30 · *`RESULTS.md` §3.*
+- [x] **T10.6** Rehearse the final demonstration end to end, in order, per `specs.md` §28:
       receiver → capture → hybrid run → GBN under clean → induce loss → detection → SR
       transition → selective retransmission in Wireshark → restore low loss → SR→GBN after
       hysteresis → stop capture → hash verification → metrics vs pure GBN and pure SR.
-      **Satisfies:** §28
-- [ ] **T10.7** Walk the Definition of Done checklist (`specs.md` §29) and check off every item.
+      **Satisfies:** §28 · *Scripted as `experiments/demonstrate.py` and run: all thirteen
+      steps in order, transcript in `experiments/results/demonstration.md`, capture in
+      `captures/demonstration.pcapng`. The condition and seed are fixed in the source, so the
+      transcript reports whatever happened rather than the best of several attempts.*
+- [x] **T10.7** Walk the Definition of Done checklist (`specs.md` §29) and check off every item.
+      *Every box now names its evidence; a checklist ticked from memory is not a checklist.*
 
 **M11 complete when:** code, tests, results, documentation, and presentation are all complete.
+*Done. The rehearsal is the part worth recording honestly: the controller detected a change
+it was not told about, switched to SR 5.7 s later, returned to GBN 1.6 s after the condition
+reverted, and delivered a file whose hash matched — but finished at only 1.03× pure GBN and
+0.96× pure SR on that condition, because it is lossy for just 12 s of a ~25 s transfer and
+the hybrid pays two drains neither baseline pays. The transcript says so. The performance
+claim belongs to the matrix (2.00× pure GBN at 20% loss), and the demonstration is evidence
+for the mechanism.*
 
 ---
 

@@ -682,19 +682,58 @@ Graphs (all generated from recorded experiment data):
 
 ## 29. Definition of Done
 
-- [ ] Arbitrary test files can be transferred reliably.
-- [ ] GBN works independently.
-- [ ] SR works independently.
-- [ ] Hybrid switching works during a transfer.
-- [ ] Mode transitions preserve correctness.
-- [ ] Controlled loss and optional delay/jitter can be reproduced.
-- [ ] GBN, SR, and Hybrid are compared fairly.
-- [ ] Raw logs are retained.
-- [ ] Graphs are generated automatically.
-- [ ] Wireshark captures demonstrate protocol behavior.
-- [ ] Source and received file hashes match on successful runs.
-- [ ] All major configuration choices are documented.
-- [ ] Known limitations and failed experiments are reported.
+Walked item by item at T10.7. Each box names the evidence, because a checklist ticked from
+memory is not a checklist.
+
+- [x] **Arbitrary test files can be transferred reliably.** Any file the CLI is pointed at is
+      segmented, transferred and hash-verified; sizes from 4 KiB to 3 MiB appear across the
+      test suite, the calibration sweep and the matrix. 195 experimental transfers of 1 MiB
+      completed with matching hashes.
+- [x] **GBN works independently.** `protocol/gbn.py`, behind the shared strategy interface.
+      `--mode gbn` is one of the two measured baselines; `test/test_gbn.py` covers cumulative
+      ACK processing, base non-regression and range retransmission.
+- [x] **SR works independently.** `protocol/sr.py`: per-segment timers, out-of-order
+      buffering, individual ACKs, duplicate suppression, and the half-sequence-space window
+      assertion (`test/test_sr.py`).
+- [x] **Hybrid switching works during a transfer.** Observed in every E8 trial and in the
+      T10.6 rehearsal: GBN→SR on rising loss and SR→GBN on falling loss, inside one transfer.
+- [x] **Mode transitions preserve correctness.** By construction (D10): the sender drains its
+      window to a quiescent boundary before the MODE exchange, and segment payloads live in
+      mode-independent transfer state, so no unacknowledged segment can be lost in the
+      rebuild. A handshake that exhausts its retry budget is abandoned and the transfer
+      continues in the current mode. Every one of the 15 E8 runs and all 50 hybrid runs in
+      the matrix finished with a matching hash.
+- [x] **Controlled loss and optional delay/jitter can be reproduced.** `network/simulator.py`
+      draws from a per-direction seeded RNG; the same seed replays the same drop sequence
+      (RP-03, `test/test_simulator.py`). Delay, jitter and `loss_schedule` step functions are
+      all reproducible the same way.
+- [x] **GBN, SR, and Hybrid are compared fairly.** Within every cell of the matrix all
+      systems meet the same source file, segment size, window, derived RTO **and the same
+      impairment seed** — the seed derivation deliberately does not take the system as an
+      input, and a test asserts it (RP-04).
+- [x] **Raw logs are retained.** `logs/experiments/<run_id>/` holds both endpoints' untouched
+      `events.csv` and `summary.json`. The run index records a SHA-256 of each event log and
+      `run_experiment.py --verify` recomputes all 390 of them; aggregation only reads (RP-07).
+- [x] **Graphs are generated automatically.** Eight figures, `python
+      experiments/analyze_results.py`, from recorded data with no manual editing
+      (`experiments/results/figures.md`).
+- [x] **Wireshark captures demonstrate protocol behavior.** Five captures covering WS-01 …
+      WS-09, recorded by script so they can be retaken (`captures/README.md`), plus the
+      demonstration capture. `tools/hybrid_arq.lua` names the header fields so the patterns
+      can be filtered rather than eyeballed.
+- [x] **Source and received file hashes match on successful runs.** 195 of 195 in the matrix;
+      a mismatch is always a reported failure and can never be recorded as a successful run
+      (CC-01), which is asserted in `test/test_experiments.py`.
+- [x] **All major configuration choices are documented.** All fourteen decisions D1–D14 are
+      frozen, each with its final value and the rationale recorded at freeze time in §16, and
+      marked Frozen in `design.md` §12 and at the point where each is stated. Every run
+      records the configuration it actually used, plus the freeze state of every decision and
+      the commit that produced it.
+- [x] **Known limitations and failed experiments are reported.** `RESULTS.md` §2, including
+      the 1–2% oscillation the calibration's shorter transfers could not have caught, the
+      estimator's GBN bias, the per-switch drain cost, the E8 schedule that outran its
+      transfer, the two discarded calibration schedules, and the second file size that was
+      never run.
 
 ## 30. Research Positioning
 

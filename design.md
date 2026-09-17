@@ -157,22 +157,22 @@ offset  size  field
  21      -    PAYLOAD (PAYLOAD_LENGTH bytes)
 ```
 
-**DECISION D1 — endianness and packing.** Recommend network byte order (big-endian) with
+**DECISION D1 — endianness and packing. FROZEN (T1.1, specs.md §16.1).** Recommended and adopted: network byte order (big-endian) with
 no implicit padding: `struct.Struct("!HBBBIIHHI")`. Explicit `!` prevents platform-dependent
 alignment, which would otherwise silently break cross-machine runs.
 
-**DECISION D2 — checksum algorithm and coverage.** Recommend CRC-32
+**DECISION D2 — checksum algorithm and coverage. FROZEN (T1.2, specs.md §16.4).** Recommended and adopted: CRC-32
 (`zlib.crc32`) computed over *the header with the CHECKSUM field zeroed, plus the payload*.
 Rationale: covers every field (so a corrupted SEQUENCE is caught, not just corrupted data),
 is deterministic across Python versions, and is cheap. Coverage must be documented in the
 module docstring since it cannot be inferred from the wire bytes.
 
-**DECISION D3 — maximum payload / `SEGMENT_SIZE`.** Recommend 1024 bytes, keeping
+**DECISION D3 — maximum payload / `SEGMENT_SIZE`. FROZEN (T1.3, specs.md §16.3).** Recommended and adopted: 1024 bytes, keeping
 21 + 1024 = 1045 bytes well under a 1500-byte Ethernet MTU so no IP fragmentation confuses
 the Wireshark evidence (specs.md §22). PAYLOAD_LENGTH is 2 bytes, so the format permits up
 to 65535; the *configured* limit is what must be frozen.
 
-**DECISION D4 — initial sequence number.** Recommend `0` for the first DATA segment, with
+**DECISION D4 — initial sequence number. FROZEN (T1.3, specs.md §16.2).** Recommended and adopted: `0` for the first DATA segment, with
 sequence numbers being **segment indices**, not byte offsets. Segment indexing makes window
 arithmetic, logs, and Wireshark reading directly comparable to textbook GBN/SR. Wraparound
 is out of scope (SEQ-04): a 4-byte counter at 1 KiB segments covers ~4 TiB per transfer.
@@ -213,7 +213,7 @@ simulated loss (IN-04).
 
 ### 3.3 Control payloads
 
-START and FIN carry metadata; the header alone is not enough. Recommend a JSON object in
+START and FIN carry metadata; the header alone is not enough. Adopted: a JSON object in
 the payload — self-describing, easy to read in a Wireshark payload pane, and cheap since
 these packets are rare:
 
@@ -256,7 +256,7 @@ Sender state (specs.md §7.1): `base`, `next_seq`, `window_size`, an outstanding
 buffer, and a **single timer for the oldest outstanding packet**.
 
 - Send rule: transmit while `next_seq < base + window_size` and segments remain.
-- ACK rule: cumulative. **DECISION D5 — GBN ACK semantics.** Recommend
+- ACK rule: cumulative. **DECISION D5 — GBN ACK semantics. FROZEN (T3.1, specs.md §16.5).** Recommended and adopted:
   `ACK = highest in-order sequence received`, so ACK *n* means "0..n received"; an ACK with
   `ack < base` is ignored (GBN-03). The alternative ("next expected") is equally valid — what
   matters is that one is chosen, documented, and used identically on both endpoints (SEQ-03).
@@ -275,7 +275,7 @@ Sender state (specs.md §8.1): `send_base`, `next_seq`, `window_size`, and per-s
 records `{seq: (payload, acked, sent_at, retx_count, timer_deadline)}` — i.e. **one timer
 per outstanding segment**, which is the essential structural difference from GBN.
 
-- ACK rule: **DECISION D6 — SR ACK semantics.** Recommend per-segment ACKs where
+- ACK rule: **DECISION D6 — SR ACK semantics. FROZEN (T4.4, specs.md §16.6).** Recommended and adopted: per-segment ACKs where
   `ACK = the sequence being acknowledged` (not cumulative). Duplicate ACKs are idempotent.
   `send_base` advances past the contiguous run of acked segments.
 - Timeout rule: retransmit **only** the timed-out segment (SR-10), and restart only that
@@ -305,7 +305,7 @@ Per specs.md §11, timeout behavior is kept as similar as practical across all t
 so the comparison isolates retransmission strategy, not timer tuning:
 
 - Fixed `RTO` from `config.py` for GBN, SR, and Hybrid alike. No adaptive RTO (§3 of specs).
-- **DECISION D7 — baseline `RTO`.** Recommend `max(4 × RTT, 200 ms)` computed *per
+- **DECISION D7 — baseline `RTO`. FROZEN (T4.9, specs.md §16.8).** Recommended and adopted: `max(4 × RTT, 200 ms)` computed *per
   experimental condition and then held fixed for the whole run*, and recorded in the run
   config. A single absolute constant cannot serve both the 10 ms and 500 ms RTT conditions
   (E7); deriving it from the condition keeps the three systems comparable within each cell of
@@ -322,7 +322,7 @@ so the comparison isolates retransmission strategy, not timer tuning:
 The controller keeps a sliding observation window and evaluates on a fixed cadence
 (HY-01).
 
-**DECISION D8 — loss estimator.** Recommend a fixed-size sliding window over the last
+**DECISION D8 — loss estimator. FROZEN (T5.2, specs.md §16.9).** Recommended and adopted: a fixed-size sliding window over the last
 `N` DATA *transmission outcomes* (default `N = 50`), where an outcome is "acked without
 retransmission" vs. "required retransmission":
 
@@ -390,8 +390,9 @@ never switches, isolating switching overhead from switching benefit (specs.md §
 
 ### 6.3 Safe transition mechanism
 
-This is the correctness-critical part of the design. **DECISION D10 — transition
-mechanism.** Recommend the **explicit MODE handshake at a quiescent boundary**:
+This is the correctness-critical part of the design. **DECISION D10 — transition mechanism.
+FROZEN (T5.4, specs.md §16.12).** Recommended and adopted: the **explicit MODE handshake at
+a quiescent boundary**:
 
 1. Controller decides to switch. Sender stops introducing *new* segments (the window is not
    refilled) but keeps servicing timers under the **current** mode.
@@ -690,7 +691,12 @@ files show a single drop stream handled two ways.
 | D14 | File size(s) | 1 MiB for the whole matrix; the proposed 10 MiB second size was not run | **Frozen** (T8.1) |
 
 Each of these maps to an item in specs.md §16 and must be marked frozen — in code and in
-`specs.md` — before the final experiment sweep begins. **All fourteen are now frozen.**
+`specs.md` — before the final experiment sweep begins. **All fourteen are now frozen**, and
+the DECISION blocks earlier in this document carry the same marker where they are stated, so
+a reader who arrives at one of them mid-document is not left thinking it is still a proposal
+(T10.2). specs.md §16 holds each final value together with the rationale that was recorded
+at the moment it was frozen — not reconstructed afterwards, which is how a frozen value
+becomes an unexplained one.
 D12-D14 were settled at T8.1 against a measured pilot of the matrix (one trial of E1 and one
 of E6 at 1 MiB and 100 ms RTT: 16.2 s clean, 137.1 s for GBN at 20% loss with 2112
 retransmissions, 67.9 s for SR with 264), not against the recommendations they carried here

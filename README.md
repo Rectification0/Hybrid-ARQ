@@ -16,18 +16,22 @@ global novelty (`specs.md` §30).
 | `specs.md` | Requirements, with stable requirement IDs |
 | `design.md` | Technical design: modules, state machines, decisions D1–D14 |
 | `tasks.md` | Task breakdown with explicit completion conditions |
+| `RESULTS.md` | The findings: hypotheses H-01…H-05, limitations, positioning |
 
 ## Status
 
-**Phase 9 complete (M10)** — the results are aggregated, graphed and captured:
-eight figures in `plots/` (indexed in
+**All phases complete (M1–M11).** 601 tests pass. The protocol, both baselines and the
+hybrid controller are implemented and tested; the experimental matrix of `specs.md` §19 has
+been run and written up; the graphs, the Wireshark evidence set and the demonstration
+rehearsal are all produced by script from recorded data.
+
+The findings are in [`RESULTS.md`](RESULTS.md) — hypotheses, limitations, positioning —
+with eight figures in `plots/` (indexed in
 [`experiments/results/figures.md`](experiments/results/figures.md)) and the five-file
-Wireshark evidence set in `captures/`, all produced by script from data that was never
-re-run. The matrix of `specs.md` §19 behind them:
+Wireshark evidence set in `captures/`. The matrix behind them:
 **195 transfers, every one with a matching hash**, recorded in
 [`experiments/results/experiment_runs.csv`](experiments/results/experiment_runs.csv) and
 written up in [`experiments/results/experiments.md`](experiments/results/experiments.md).
-563 tests pass.
 
 Headline, 1 MiB over loopback at 100 ms RTT, five trials per cell, identical seed and file
 across systems within each cell:
@@ -81,8 +85,11 @@ about what an ACK means and no packet may ever be read under the wrong conventio
 semantics, **D7** baseline RTO, **D8** loss estimator, **D9** switching thresholds,
 **D10** transition mechanism, **D11** window size, and — settled at T8.1 against a measured
 pilot rather than against their standing recommendation — **D12** five trials per cell,
-**D13** the seed policy, **D14** a 1 MiB transfer for the whole matrix. Next up is
-**Phase 9 (T9.1–T9.5): analysis, graphs and the Wireshark evidence set**.
+**D13** the seed policy, **D14** a 1 MiB transfer for the whole matrix.
+
+The findings are written up in [`RESULTS.md`](RESULTS.md): which of the five hypotheses
+held, where the hybrid is *worse* than a fixed strategy, and what the project does not
+claim.
 
 D9 was calibrated rather than guessed — 444 recorded transfers, written up in
 [`experiments/results/calibration.md`](experiments/results/calibration.md). Three findings
@@ -106,31 +113,37 @@ it agrees with what the endpoints computed while they ran. Every run records the
 configuration it actually used — seed, impairment, derived RTO, file size, thresholds — with
 the freeze state of each decision and the commit that produced it.
 
-Running the matrix, or one cell of it:
-
-```bash
-python experiments/run_experiment.py --all --resume        # E1-E8, skipping what is recorded
-python experiments/run_experiment.py --config experiments/configs/E4.json
-python experiments/run_experiment.py --all --dry-run       # print the plan, run nothing
-python experiments/run_experiment.py --verify              # integrity + raw-log fingerprints
-```
-
-Regenerating the analysis, the graphs and the capture set — none of which re-runs a transfer:
-
-```bash
-python experiments/analyze_results.py                  # aggregate.csv + every plot
-python experiments/analyze_results.py --check-logs     # re-derive all 195 runs from events.csv
-python experiments/capture_evidence.py                 # re-record the Wireshark evidence
-python experiments/capture_evidence.py --manifest-only # rebuild captures/README.md in place
-```
-
-The captures read with named fields through the optional dissector:
-
-```bash
-tshark -r captures/lossy_gbn_range_retx.pcapng -X lua_script:tools/hybrid_arq.lua        -T fields -e frame.number -e hybridarq.type_name -e hybridarq.seq -e hybridarq.ack
-```
+Reproducing any of it is one command each — see **Reproducing the results** below.
 
 See the status snapshot in `tasks.md` for the current milestone map.
+
+## Setup
+
+**The protocol itself needs nothing but Python 3** — standard library only, no install step.
+Clone the repository and it runs:
+
+```bash
+git clone https://github.com/Rectification0/Hybrid-ARQ.git
+cd Hybrid-ARQ
+python -c "import protocol, network; print('ready')"
+```
+
+The analysis stage — and only that — needs pandas, Matplotlib and pytest:
+
+```bash
+pip install -r requirements.txt
+```
+
+Optional, for the packet-level evidence: **Wireshark**, with the npcap *"Adapter for
+loopback traffic capture"* option enabled at install time. Without it a local transfer is
+invisible to every interface, since loopback traffic never reaches a normal adapter. To read
+the captures with named fields, copy `tools/hybrid_arq.lua` into your personal Wireshark
+plugin folder (`Help → About Wireshark → Folders → Personal Lua Plugins`) and press
+Ctrl+Shift+L; `tshark` takes it per command with `-X lua_script:tools/hybrid_arq.lua`
+instead.
+
+Tested on Windows 11 with Python 3.12. Nothing in the protocol is platform-specific, but the
+loopback capture device name in `experiments/capture_evidence.py` is (`\Device\NPF_Loopback`).
 
 ## Packet format
 
@@ -189,6 +202,48 @@ python sender.py --file sample.bin --mode gbn --loss-schedule 5:0.2,10:0.0
 (RP-03). `--rtt` is the round trip, half applied on each direction, so the receiver needs
 the matching `--rtt` to carry the ACK half. `--loss-schedule` is `t:rate,t:rate` in
 seconds, for the dynamic-loss experiments.
+
+## Reproducing the results
+
+Four things can be regenerated, and only the first re-runs a transfer.
+
+**One experiment, or the whole matrix** (E1–E8, 195 runs, about 2.5 hours):
+
+```bash
+python experiments/run_experiment.py --config experiments/configs/E4.json
+python experiments/run_experiment.py --all --dry-run       # print the plan, run nothing
+python experiments/run_experiment.py --all --resume        # skip what is already recorded
+python experiments/run_experiment.py --verify              # integrity + raw-log fingerprints
+```
+
+`--resume` makes the matrix interruptible: the index is appended per run, so a stopped sweep
+resumes where it left off. Each run writes raw logs under `logs/experiments/<run_id>/` and
+one row to `experiments/results/experiment_runs.csv`. The whole matrix replays from two
+recorded numbers — the base seed in each config, and the commit in every `summary.json`.
+
+**The aggregate and the graphs** (reads the recorded runs; never re-runs one):
+
+```bash
+python experiments/analyze_results.py                  # aggregate.csv + all eight plots
+python experiments/analyze_results.py --check-logs     # re-derive all 195 runs from events.csv
+```
+
+**The Wireshark evidence set** (re-runs five short transfers under tshark):
+
+```bash
+python experiments/capture_evidence.py                 # all five captures + the manifest
+python experiments/capture_evidence.py --only clean_gbn
+python experiments/capture_evidence.py --manifest-only # rebuild captures/README.md in place
+
+tshark -r captures/lossy_gbn_range_retx.pcapng -X lua_script:tools/hybrid_arq.lua \
+       -T fields -e frame.number -e hybridarq.type_name -e hybridarq.seq -e hybridarq.ack
+```
+
+**The demonstration** — the thirteen steps of `specs.md` §28, performed in order:
+
+```bash
+python experiments/demonstrate.py                      # ~2 minutes, writes a transcript
+```
 
 ## Tests
 
@@ -268,14 +323,3 @@ The rule from the source specification §41: **both ARQ baselines must be correc
 the hybrid controller is written.** The controller is never to be debugged at the same
 time as the mechanism underneath it. That ordering was held: Phase 5 began only once T3.7
 and T4.8 passed for both baselines.
-
-## Setup
-
-Python 3 with the standard library is enough to run the protocol itself. The analysis
-stage needs:
-
-```
-pip install -r requirements.txt
-```
-
-Full install, run and reproduction instructions are written in T10.1.
