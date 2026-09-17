@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hybrid ARQ</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#128225;</text></svg>">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header class="shell-header">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <div>
+      <h1>Hybrid GBN/SR ARQ</h1>
+      <p class="brand-sub">UDP file transfer with runtime adaptive switching &middot; protocol analysis dashboard</p>
+    </div>
+  </div>
+
+  <div class="header-status">
+    <div class="run-picker">
+      <label for="run-select">Run under inspection</label>
+      <select id="run-select" aria-label="Run under inspection"></select>
+    </div>
+    <div id="live-status" class="live-status" role="status" aria-live="polite">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="live-text">connecting&hellip;</span>
+    </div>
+    <div id="backend-status" class="backend-status" role="status"></div>
+  </div>
+</header>
+
+<nav class="shell-nav" aria-label="Sections">
+  <ul id="nav-list"></ul>
+</nav>
+
+<main id="view" class="shell-main" tabindex="-1">
+  <div class="loading-block"><span class="spinner" aria-hidden="true"></span> Loading the dashboard&hellip;</div>
+</main>
+
+<footer class="shell-footer">
+  <span>Everything shown is read from recorded <code>events.csv</code>, <code>summary.json</code> and
+    <code>experiments/results/</code>. The controller lives in <code>protocol/hybrid.py</code>;
+    this page visualizes decisions it already recorded and computes none of its own.</span>
+  <span id="footer-lag" class="footer-lag"></span>
+</footer>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

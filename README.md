@@ -20,10 +20,12 @@ global novelty (`specs.md` §30).
 
 ## Status
 
-**All phases complete (M1–M11).** 601 tests pass. The protocol, both baselines and the
+**All phases complete (M1–M12).** 667 tests pass. The protocol, both baselines and the
 hybrid controller are implemented and tested; the experimental matrix of `specs.md` §19 has
 been run and written up; the graphs, the Wireshark evidence set and the demonstration
-rehearsal are all produced by script from recorded data.
+rehearsal are all produced by script from recorded data. Phase 11 adds a browser dashboard
+over the finished system (see [Dashboard](#dashboard)) — a presentation layer that reads the
+recorded artifacts and drives the existing CLI, adding no capability to the protocol itself.
 
 The findings are in [`RESULTS.md`](RESULTS.md) — hypotheses, limitations, positioning —
 with eight figures in `plots/` (indexed in
@@ -245,6 +247,113 @@ tshark -r captures/lossy_gbn_range_retx.pcapng -X lua_script:tools/hybrid_arq.lu
 python experiments/demonstrate.py                      # ~2 minutes, writes a transcript
 ```
 
+## Dashboard
+
+A browser dashboard over the finished system: configure and launch a transfer, watch the
+controller switch, read the recorded results, and step through the demonstration. It is a
+**presentation and control layer** — it adds no capability to the protocol, and the CLI
+below works exactly as it always did.
+
+```
+pip install -r requirements.txt     # not required: the dashboard is standard library only
+python -m frontend                  # opens http://127.0.0.1:8080
+python -m frontend --port 9000 --no-browser
+```
+
+No `npm install`, no build step, no framework. The protocol is standard library only and so
+is the dashboard: `http.server` on the back, hand-written ES modules and inline SVG on the
+front, served exactly as written. `requirements.txt` is still only for `experiments/`.
+
+### Startup order
+
+1. `python -m frontend` — the dashboard binds `127.0.0.1:8080`.
+2. Open the URL. The header shows whether the backend is reachable and whether its preflight
+   checks pass.
+3. **Optional, and recommended for a demonstration:** start a Wireshark capture on the npcap
+   loopback adapter with the filter `udp.port == 8888` *before* launching a transfer.
+4. Configure a run on **Transfer Control** and press Start. The dashboard starts
+   `receiver.py`, waits for its bound port, then starts `sender.py`.
+
+You do not start the receiver yourself — the dashboard does, in the right order. A sender
+that starts before the socket exists spends its START retry budget on a receiver that was
+merely slow.
+
+### The screens
+
+| Screen | Shows |
+| --- | --- |
+| **Transfer Control** | File size, host, port, mode, window, loss, ACK loss, RTT, jitter, seed and loss schedule, plus presets for conditions the matrix already measured. Frozen values sit beside the form as read-only context. |
+| **Overview** | Lifecycle state, progress, segment counts, current mode, elapsed time, and the integrity verdict with source and received hashes side by side. |
+| **Adaptive Mode** | The centrepiece: mode over time as a band, every transition with its reason, the estimator reading at that instant, the epoch, and time spent in each mode. |
+| **Network** | Configured impairment beside observed measurement, kept apart, with sparklines. |
+| **Events** | `events.csv` in the specs.md §21 columns, filterable by event, mode and sequence. |
+| **Retransmissions** | Sequence number against time — GBN's range retransmission and SR's single-segment retransmission as visibly different shapes. |
+| **Metrics** | Every specs.md §20 metric with units, plus the endpoints' own counters beside the derivation for comparison. |
+| **GBN vs SR vs Hybrid** | The recorded matrix from `aggregate.csv`, the generated figures, and a panel for the conditions where the hybrid *loses*. |
+| **Run History** | All 195 recorded matrix runs and every run on this machine, each opening into its own metrics, events and mode timeline. |
+| **Wireshark** | The filter, port, mode and timestamps worth jumping to, and what to look for per mode. |
+| **Demonstration** | The thirteen steps of specs.md §28 as a guided flow, presenting the run `experiments/demonstrate.py` recorded. |
+
+Picking a run in the header points every screen at it, so a demonstration does not hop
+between pages mid-flow.
+
+### Where its runs go
+
+Transfers started from the dashboard write to `logs/ui/<run_id>/`, beside the CLI's and the
+matrix's rather than mixed in with them. They use the project's own `sender.py` and
+`receiver.py` command lines — the **exact commands are shown on the control panel** — so a
+run started in the browser is the same run as one typed into a terminal, logged through the
+same emitter.
+
+Source files are generated deterministically at the requested size, the same pseudo-random
+blob the matrix used, so a UI run transfers exactly the bytes an experimental run of that
+size did.
+
+### Relationship to Wireshark
+
+**The dashboard does not inspect packets.** It reads what the endpoints recorded. Wireshark
+is what confirms the packets on the wire match, and the two are kept separate rather than
+merged into one apparently complete picture:
+
+- From the **logs** (the dashboard): controller state and switch reasons, the loss estimate,
+  every metric in specs.md §20, retransmission counts.
+- From the **capture** (Wireshark): the packets actually on the wire, header fields at fixed
+  offsets, duplicate sequences as the network saw them.
+
+`captures/` holds the curated per-scenario evidence set and the demonstration capture — not
+one capture per transfer. The Wireshark screen offers the relevant recorded capture and says
+which run it came from; it never implies an arbitrary run has one.
+
+### Known limitations
+
+- **The live view is near-real-time, not real-time.** `events.csv` is flushed every 64 rows
+  on purpose — a per-event `fsync` would distort the very timings the log exists to measure —
+  so a live transfer can trail by up to 64 events. The UI states this rather than hiding it,
+  and the flush policy is not to be loosened to make the dashboard smoother.
+- **One transfer at a time.** Two would contend for the UDP port and make "the current run"
+  ambiguous everywhere else.
+- **It computes no protocol behaviour.** The switching policy stays in `protocol/hybrid.py`
+  and metrics come from `metrics.py`. Switch reasons are the controller's own strings, read
+  back verbatim; nothing is re-evaluated in the browser.
+- **Frozen values cannot be changed from it.** The segment size, the D9 thresholds, the
+  hysteresis count, the evaluation cadence, the minimum residence and the D8 window are shown
+  as read-only context. RTO is not a field at all — D7 derives it from the condition's RTT.
+- **Loss shown as "configured" is simulated.** It is a seeded drop decision made before the
+  datagram reaches the socket, never a measurement of a real network.
+- **The loss estimate is a reading of the D8 estimator, not a loss rate.** It over-reads under
+  GBN by four to five times, so `SWITCH_HIGH = 0.10` fires at roughly 2% physical loss.
+- **Nothing is fabricated.** Where data does not exist the UI says so and names the path it
+  looked for. A value that was not recorded renders as a dash, never as zero.
+- **It binds loopback by default**, because it can start processes and read this checkout.
+
+### Deleting it changes nothing
+
+`test/test_frontend.py` demonstrates rather than asserts it: nothing under `protocol/`,
+`network/` or `experiments/`, and neither endpoint, imports the frontend, and no other test
+module references it. Remove `frontend/` and the protocol's correctness and every recorded
+experimental result are exactly what they were. The architecture and its rationale are in
+`design.md` §13.
+
 ## Tests
 
 ```
@@ -299,6 +408,11 @@ experiments/
   capture_evidence.py  the scripted Wireshark evidence set         ✅
   configs/             per-experiment configuration (E1–E8)        ✅
   results/             calibration + matrix evidence, aggregate    ✅
+frontend/
+  server.py            stdlib HTTP: JSON API + static bundle        ✅
+  data.py              read-only access to logs and results         ✅
+  runner.py            launches the existing sender/receiver CLI    ✅
+  static/              the dashboard itself; no build step          ✅
 tools/hybrid_arq.lua   optional Wireshark dissector (T9.5)         ✅
 eventlog.py            events.csv / summary.json emitter            ✅
 metrics.py             specs.md §20 derived from events.csv alone   ✅

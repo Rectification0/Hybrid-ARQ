@@ -701,3 +701,156 @@ D12-D14 were settled at T8.1 against a measured pilot of the matrix (one trial o
 of E6 at 1 MiB and 100 ms RTT: 16.2 s clean, 137.1 s for GBN at 20% loss with 2112
 retransmissions, 67.9 s for SR with 264), not against the recommendations they carried here
 — which is why D14's second file size is recorded as *not run* rather than quietly dropped.
+
+## 13. Frontend architecture (Phase 11, T11.1)
+
+The frontend is a **presentation and control layer over the finished system**. It is not a
+replacement for the CLI, the protocol modules, the experiment runner or Wireshark, and it
+adds no capability to the protocol — it makes the capabilities that already exist easy to
+see.
+
+Decisions here are deliberately **not D-numbered**. D1–D14 are the decisions whose values are
+baked into recorded evidence, so changing one invalidates experiments; a frontend framework
+choice cannot invalidate a transfer that already happened. They are recorded below with their
+rationale and are *not* added to `specs.md` §16. For the same reason Phase 11 introduced no
+new requirement IDs: it adds no requirement to the protocol.
+
+### 13.1 Stack
+
+| ID | Choice | Why |
+| --- | --- | --- |
+| F1 | Server: `http.server` from the standard library (`frontend/server.py`) | The protocol is standard library only. Requiring Flask or FastAPI to *look at* a stdlib protocol means an evaluator installs a web framework before they can read a result. `requirements.txt` stays what it was: analysis dependencies for `experiments/`. |
+| F2 | UI: hand-written ES modules, no framework and no build step | The files are served exactly as written. No `npm install`, no bundler, no `node_modules`, and no generated artifact that could drift from its source. An evaluator with a browser has everything. |
+| F3 | Charts: inline SVG (`static/js/chart.js`) | Same reason as F2, and it keeps the drawing code readable: every function takes points that came out of a log and draws exactly those. The recorded figures in `plots/` are shown as images beside them, never redrawn — a second rendering of the same data could disagree with the one in the report. |
+| F4 | Run command: `python -m frontend` | One command, no environment beyond the project's own. `--port` moves it, `--no-browser` suppresses the browser launch. |
+| F5 | Binds `127.0.0.1` by default | The dashboard starts processes and reads this checkout. It is a local tool, not a service, and the default should not be one. |
+| F6 | One dark theme, not a system-preference pair | The primary use is a demonstration on a projector. A palette that changes with the viewer's OS setting would change what the mode colours look like between the rehearsal and the room, and the figures in `plots/` are fixed regardless. |
+
+Mode colour is consistent everywhere a mode appears and matches the figures exactly — GBN
+blue, SR orange, Hybrid aqua, fixed-hybrid yellow (`experiments/results/figures.md`). Colour
+is never the only carrier: every mode chip is also labelled, every chart series carries its
+name, and the retransmission plot gives each event type its own marker shape.
+
+### 13.2 Module boundaries
+
+The layering rule of §1.1 extends by one row, and the arrow points one way only:
+
+| Layer | Knows about | Must not know about |
+| --- | --- | --- |
+| `frontend/data.py` | recorded artifacts: `events.csv`, `summary.json`, results CSVs, `plots/`, `captures/` | sockets, windows, timers, how a decision was made |
+| `frontend/runner.py` | subprocess lifecycle, request validation | packet layout, ARQ bookkeeping, switching policy |
+| `frontend/server.py` | HTTP routing, JSON, static files | everything below `data`/`runner` |
+| `frontend/static/` | rendering what an endpoint returned | all of the above |
+
+**Nothing below the frontend imports it.** `test/test_frontend.py` parses every module under
+`protocol/`, `network/` and `experiments/`, plus both endpoints, `metrics.py`, `eventlog.py`
+and `config.py`, and asserts none of them names it — which is what makes "deleting the
+frontend leaves the protocol's correctness and every recorded experimental result unchanged"
+demonstrable rather than merely stated (T11.15). Every other test module is checked the same
+way, so the suite that proves the protocol correct still runs with the package removed.
+
+### 13.3 How data reaches the UI
+
+Read-only, and from the artifacts that already exist:
+
+```
+logs/<group>/<run_id>/<endpoint>/events.csv   ---+
+logs/<group>/<run_id>/<endpoint>/summary.json ---+--> frontend/data.py --> JSON --> /api/* --> views
+experiments/results/*.csv                     ---+
+plots/*.png, captures/*.pcapng                ---+
+```
+
+A **second, incompatible logging path would break CC-06** — the rule that every metric is
+derivable from the event log alone — by giving one number two sources that can disagree. So
+the frontend writes no event log, and a test asserts it never constructs an `EventLog` and
+never opens a file for writing. Metrics come from `metrics.py`, the same derivation T6.2
+asserts against the endpoints' own counters; a test asserts the API returns exactly what
+`metrics.derive_from_run` returns for the same run.
+
+**Run identity.** `EventLog` writes `<log_dir>/<run_id>/<endpoint>/`, and log directories
+nest (`logs/experiments/E1_gbn_loss00_trial00/sender/`), so a bare `run_id` is not unique
+across the tree. Each run therefore carries a `key` — its path relative to `logs/` — for
+addressing, alongside the `run_id` it recorded, which is what the UI displays and what
+`experiment_runs.csv` is joined on. Keys arrive from URLs and are resolved against `logs/`,
+so `..` and absolute paths are refused.
+
+`experiment_runs.csv` records absolute `log_dir` paths from the machine that produced the
+matrix. Only the tail below `logs/` is used to find them here, and a row whose directory is
+not present on this checkout says so rather than linking to nothing.
+
+### 13.4 Live status
+
+`frontend/runner.py` starts `receiver.py`, reads back its bound port, then starts
+`sender.py` — the same orchestration `experiments/run_experiment.py` performs, reusing its
+helpers rather than reimplementing them. A run launched from the dashboard is therefore the
+same run as one typed into a terminal, writing the same logs through the same emitter, under
+`logs/ui/`.
+
+Progress, lifecycle state and current mode are **read back out of that run's own
+`events.csv`**, not out of the runner's memory. The consequence is that the dashboard shows
+the same numbers `metrics.py` would derive, and stays honest about a transfer someone started
+from a terminal instead. Lifecycle states are the ones §7 already defines; no new vocabulary
+is invented for the screen.
+
+`eventlog.FLUSH_EVERY` is 64 and **stays 64**: a per-event `fsync` would distort the very
+timings the log exists to measure. The live view is therefore *near*-real-time and can trail
+a transfer by up to 64 events. T11.4 states that in the UI rather than hiding it — the flush
+policy must not be loosened to make an animation smoother, which would trade measurement
+fidelity for presentation.
+
+One transfer at a time. Two would contend for the UDP port and, worse, would make "the
+current run" ambiguous everywhere else in the UI.
+
+### 13.5 What the UI is forbidden to do
+
+Three rules, each checked by a test rather than left to discipline:
+
+1. **It never computes protocol behaviour.** The switching policy stays in
+   `protocol/hybrid.py`. Switch reasons, the loss estimate at a transition and the epoch are
+   read from the recorded `SWITCH` and `MODE` rows verbatim. A test parses `data.py` and
+   fails if it compares anything against `SWITCH_HIGH`, `SWITCH_LOW` or `HYSTERESIS_COUNT` —
+   a threshold evaluated a second time is a second controller, and the two would drift.
+   A `SWITCH` row whose reason is `FIXED_HYBRID_NOOP` is shown as the control paying the
+   drain cost, and is excluded from the transition count exactly as `metrics.py` excludes it.
+2. **It never fabricates.** No placeholder metric, invented packet, simulated switch or
+   demo-only animation that looks like measured behaviour. A missing run, an absent results
+   CSV or a capture that does not exist produces an explicit empty state naming the path it
+   looked for. A value that was not recorded renders as a dash, never as zero, and a run with
+   no FIN_ACK verdict is never reported as a passing integrity check (CC-01).
+3. **Frozen values are shown, never edited.** The editable fields are declared in
+   `data.EDITABLE_FIELDS`; `SEGMENT_SIZE`, the D9 thresholds, the hysteresis count, the
+   evaluation cadence, the minimum residence and the D8 window are read-only context carrying
+   the decision that froze each one. RTO is not a field at all: D7 derives it from the
+   condition's RTT and then holds it fixed for the run. An unknown key is refused rather than
+   passed through — the same discipline `config.snapshot` applies to a recorded config.
+
+The loss estimate is labelled everywhere as **a reading of the D8 estimator, not a loss
+rate**. It over-reads under GBN by four to five times, so `SWITCH_HIGH = 0.10` fires at
+roughly 2% physical loss, and the UI never describes it as "switch at 10% loss". Configured
+impairment and observed measurement appear under separate headings for the same reason:
+simulated loss is a controlled input, not a measurement of a network.
+
+Results that reflect badly on the hybrid are shown with the rest (H-05). The comparison view
+has a panel of its own for the cells where the hybrid loses to a fixed strategy and for the
+1–2% oscillation, and points at `calibration.md` §5 for the full account.
+
+### 13.6 Wireshark, and what the dashboard does not claim
+
+The dashboard reads logs; Wireshark reads the wire. The companion panel gives the filter, the
+port, the mode and the timestamps worth jumping to, and states which facts come from which
+source. **It does not inspect packets**, and says so. `captures/` holds the curated T9.4
+evidence set and the demonstration capture — one per *scenario*, not one per transfer — so a
+run is offered the relevant recorded capture, labelled as being from another run, rather than
+being implied to have one of its own.
+
+### 13.7 Known gaps, documented rather than worked around
+
+Found before planning rather than during, per rule 15 of the phase brief:
+
+- **Live event data lags by up to 64 rows**, by design (§13.4). Stated in the UI.
+- **Captures exist per scenario, not per run** (§13.6). Stated in the UI.
+- **The receiver's computed hash was not in its `summary.json`.** It recorded
+  `expected_sha256` and sent its own hash in the FIN_ACK payload, but never wrote it down, so
+  "source hash vs received hash" had only one side on disk. `received_sha256` was added
+  beside it — a *logging* addition of exactly the kind T6.2 made when it added the `bytes`
+  column, not a protocol change, and covered by `test/test_logging.py`.

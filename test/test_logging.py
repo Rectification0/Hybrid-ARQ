@@ -499,6 +499,37 @@ def test_the_receiver_summary_records_its_own_run_config(tmp_path):
     assert recorded["port"] == rx.port
 
 
+def test_the_receiver_summary_records_the_hash_it_computed(tmp_path):
+    """Both sides of the integrity comparison have to be readable afterwards.
+
+    The receiver already recorded ``expected_sha256`` — the hash the sender
+    claimed — and sent its own back in the FIN_ACK, but never wrote it down, so
+    "source hash vs received hash" had only one side on disk (T11.4).
+    """
+    tx, rx, source, _, error, failures = run_transfer(
+        tmp_path, size=config.SEGMENT_SIZE * 5, run_id="rxhash")
+    assert error is None and not failures
+
+    recorded = json.loads((rx.log.directory / "summary.json").read_text(encoding="utf-8"))
+    assert recorded["received_sha256"] == sha256_of(source)
+    assert recorded["received_sha256"] == recorded["expected_sha256"]
+    assert recorded["metrics"]["integrity_success"] is True
+
+
+def test_a_receiver_that_never_finalized_records_no_computed_hash(tmp_path):
+    """Absence is recorded as absence, never as a match (CC-01)."""
+    logs = tmp_path / "logs"
+    rx = Receiver(output=tmp_path / "out.bin", host="127.0.0.1", port=0,
+                  run_id="nohash", log_dir=logs, idle_timeout=0.3)
+    rx.bind()
+    with pytest.raises(ReceiverError):
+        rx.run()
+
+    recorded = json.loads((rx.log.directory / "summary.json").read_text(encoding="utf-8"))
+    assert recorded["received_sha256"] is None
+    assert recorded["expected_sha256"] is None
+
+
 def test_an_unknown_config_key_is_refused():
     """A typo must not quietly invent a parameter in the recorded config."""
     with pytest.raises(KeyError, match="not a specs.md"):

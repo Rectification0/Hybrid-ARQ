@@ -140,6 +140,12 @@ class Receiver:
         self.window_size = 1
         self.duplicates = 0
         self.integrity_success = False
+        # The hash this receiver computed over what it actually wrote. It goes
+        # out in the FIN_ACK payload, but T11.4 needs it written down too: a
+        # dashboard that shows "source hash vs received hash" side by side has
+        # nowhere to read the second one from otherwise. A logging addition of
+        # the same kind as the T6.2 ``bytes`` column, not a protocol change.
+        self.received_sha256: str | None = None
         self.mode_epoch = 0
         self.switch_count = 0
 
@@ -422,6 +428,7 @@ class Receiver:
                   reason=f"total_segments={info.total_segments}")
 
         written_hash = self.writer.finalize()
+        self.received_sha256 = written_hash
         expected = self.start_info.sha256
         self.integrity_success = (written_hash == expected
                                   and self.writer.segments_written == info.total_segments)
@@ -482,6 +489,7 @@ class Receiver:
             self.log.write_summary(metrics, config_overrides=self._run_config(), extra={
                 "output": str(self.output),
                 "expected_sha256": self.start_info.sha256 if self.start_info else None,
+                "received_sha256": self.received_sha256,
                 "final_state": self.state,
                 "impairment": self.impairment.as_dict(),
             })
