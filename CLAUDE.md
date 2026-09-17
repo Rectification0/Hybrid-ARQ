@@ -40,8 +40,16 @@ Wireshark filter `udp.port == 8888`. Loopback capture on Windows needs the npcap
 "/c/Program Files/Wireshark/tshark" -r captures/name.pcapng -T fields -e data.data
 ```
 
-Analysis dependencies (`pip install -r requirements.txt`) are only for `experiments/`;
-the protocol itself is standard library only.
+Dashboard (Phase 11), one command and no build step:
+
+```bash
+python -m frontend                 # http://127.0.0.1:8080
+python -m frontend --port 9000 --no-browser
+```
+
+Analysis dependencies (`pip install -r requirements.txt`) are only for `experiments/`; the
+protocol **and the dashboard** are standard library only. There is no npm, no bundler and no
+generated asset — `frontend/static/` is served exactly as written.
 
 ## The document hierarchy drives the work
 
@@ -68,13 +76,19 @@ Keep doing that — it is how the code stays traceable to the requirement it sat
 true: the value is in the code, `specs.md` §16 records it **with its rationale**, and
 `design.md` §12 says **Frozen** instead of Proposed.
 
-**Frozen so far: D1** (byte layout), **D2** (checksum coverage), **D3** (`SEGMENT_SIZE`),
-**D4** (sequence convention), **D5** (GBN ACK = highest in-order received), **D6** (SR ACK
-= exactly the segment named), **D7** (RTO = max(4xRTT, 200 ms) per condition),
-**D8** (loss estimator: 50 segment outcomes, recorded at ACK), **D9** (thresholds 0.10/0.02,
-hysteresis 3), **D10** (MODE handshake at a quiescent window), **D11** (window 8). Only the
-experiment-scale decisions D12–D14 remain open, for T8.1; each still carries a
-`# NOT FROZEN` comment in `config.py` naming its decision ID and the task that freezes it.
+**All fourteen are frozen.** D1 (byte layout), D2 (checksum coverage), D3 (`SEGMENT_SIZE`),
+D4 (sequence convention), D5 (GBN ACK = highest in-order received), D6 (SR ACK = exactly the
+segment named), D7 (RTO = max(4xRTT, 200 ms) per condition), D8 (loss estimator: 50 segment
+outcomes, recorded at ACK), D9 (thresholds 0.10/0.02, hysteresis 3), D10 (MODE handshake at a
+quiescent window), D11 (window 8), and the experiment-scale trio D12 (5 trials per cell),
+D13 (seed policy) and D14 (1 MiB for the whole matrix) — the last three settled at T8.1
+against a measured pilot rather than against the recommendation they had carried since
+`design.md` was written. `config._OPEN_DECISIONS` is empty and no `# NOT FROZEN` marker
+remains on a value; the phrase survives only in the module docstring that explains the
+convention.
+
+Nothing here is open, so a change to any of these is an *unfreeze*: it needs a recorded
+reason and it invalidates whatever evidence depended on the old value.
 
 Record the rationale at freeze time, not retroactively at T10.2 — reconstructing it later
 from memory is how a frozen value becomes an unexplained one.
@@ -108,6 +122,7 @@ Each layer is forbidden from knowing about the one above it:
 | `protocol/gbn.py`, `sr.py` | windows, timers, ACK rules | which mode is "better", thresholds |
 | `protocol/hybrid.py` | statistics, thresholds, hysteresis | byte layout, file I/O |
 | `sender.py`, `receiver.py` | lifecycle, file I/O, CLI, logging | internal ARQ bookkeeping |
+| `frontend/` | recorded artifacts, HTTP, subprocess lifecycle | everything below it — and nothing below it may import *it* |
 
 The consequence is structural: GBN and SR implement one common **strategy interface**
 (`design.md` §4), and the hybrid controller only ever swaps which implementation is active.
@@ -202,18 +217,26 @@ silent corruption and never presented as success (CC-01).
   retransmission up to two RTOs late and inflate completion times under loss.
 - **The M1 spike listener** lives at `test/spike_receiver.py`; nothing should import it.
   The real receiver is `receiver.py`.
-- **Placeholder modules are marked.** Files under `protocol/`, `network/` and `experiments/`
-  that are not yet implemented say `NOT YET IMPLEMENTED — scaffold only` in their docstring
-  and name the task that implements them. Don't mistake one for a finished module.
+- **No placeholder modules remain.** The `NOT YET IMPLEMENTED — scaffold only` convention
+  served Phases 0–9 and no file carries it now; every module under `protocol/`, `network/`,
+  `experiments/` and `frontend/` is implemented. Reintroduce the marker, naming the task that
+  will implement it, if a new scaffold is ever added.
 - `logs/`, `plots/` and `captures/` are git-ignored; curated Wireshark evidence is committed
   deliberately with `git add -f`.
 
 ## Current state
 
-**Phases 0–5 complete (M1–M7).** Both ARQ baselines pass the T4.8 failure suite under
-simulated loss, delay and corruption, and the hybrid controller switches between them at
-runtime; 446 tests pass. At 10% loss over 1 MiB with the same seed, GBN resent 883 segments
-against SR's 167.
+**All phases complete (M1–M12).** 667 tests pass. The protocol, both ARQ baselines and the
+hybrid controller are implemented and tested; the D9 thresholds are calibrated and frozen
+against a recorded sweep; the §19 matrix has been run, aggregated, graphed and written up;
+the Wireshark evidence set and the §28 demonstration are recorded; and a browser dashboard
+sits over the finished system without changing any of it.
+
+The findings are in `RESULTS.md` — hypotheses H-01…H-05, limitations, positioning. The
+headline: at 20% loss the hybrid completes in half GBN's time, and at 1–2% loss it
+oscillates and loses to both fixed strategies. Both belong in any summary of the result.
+
+### What each layer is for, once it exists
 
 The controller lives in `protocol/hybrid.py` and only ever *decides*: the MODE handshake
 itself is endpoint lifecycle, in `sender.py` / `receiver.py`. `SWITCH` means the mode
@@ -222,12 +245,51 @@ being refused, repeated or abandoned. A `SWITCH` row whose reason is `FIXED_HYBR
 the `--mode fixed-hybrid` control paying the drain cost without changing semantics, so a
 count of real transitions excludes those rows.
 
-**Phase 6 complete (M8).** The audit found four real gaps rather than confirming the log was
-already sufficient: the receiver did not log its idle timeout, a receiver that never saw a
-START wrote no log at all, packets rejected before START were dropped, and overhead and
-goodput were not derivable because nothing recorded a byte count. `design.md` §9.1 is the
-audit table, enforced by `test/test_logging.py`. 494 tests pass.
+`design.md` §9.1 is the T6.1 event audit table, enforced by `test/test_logging.py`. That
+audit found four real gaps rather than confirming the log was already sufficient — the
+receiver did not log its idle timeout, a receiver that never saw a START wrote no log at
+all, packets rejected before START were dropped, and overhead and goodput were not derivable
+because nothing recorded a byte count. Expect an audit to find something; one that confirms
+everything was already fine has probably not been performed.
 
-**Phase 7 (T7.1–T7.3) is next**: sweep the thresholds over the loss grid, freeze D9 against
-the evidence, and report any setting that made the hybrid *worse* than a fixed strategy —
-that is a result, not a bug to bury (H-05).
+### The frontend (Phase 11, M12)
+
+`python -m frontend` serves a dashboard at `127.0.0.1:8080` over the recorded artifacts and
+the existing CLI. It is a **presentation and control layer**: it adds no capability to the
+protocol, and deleting `frontend/` leaves the protocol's correctness and every recorded
+result unchanged — `test/test_frontend.py` demonstrates that rather than asserting it.
+
+Standard library only, like the protocol: `http.server` on the back, hand-written ES modules
+and inline SVG on the front, no build step and nothing added to `requirements.txt`.
+Architecture and rationale in `design.md` §13, recorded as F1–F6 — **not** as D-numbers and
+**not** in `specs.md` §16, because a framework choice cannot invalidate a transfer that
+already happened. Phase 11 introduced no new requirement IDs.
+
+There is no database, deliberately. `events.csv` and `summary.json` already are the durable
+record, and copying them into a second store would give one number two sources that can
+disagree — which is what CC-06 exists to prevent. `frontend/data.py` opens them read-only
+and shapes them for JSON; a test asserts no frontend module ever constructs an `EventLog` or
+opens a file for writing.
+
+Three rules govern anything added to it, each enforced by a test rather than by discipline:
+
+1. **It reads recorded data.** No second logging path.
+2. **It never computes protocol behaviour.** Switch reasons, the estimate at a transition and
+   the epoch are read from the recorded rows verbatim; metrics come from `metrics.py`. A test
+   parses `frontend/data.py` and fails if it compares anything against `SWITCH_HIGH`,
+   `SWITCH_LOW` or `HYSTERESIS_COUNT` — a threshold evaluated a second time is a second
+   controller, and the two would drift.
+3. **It never fabricates.** A missing run, results file or capture produces an explicit empty
+   state naming the path it looked for. A value that was not recorded renders as a dash,
+   never as zero, and a run with no FIN_ACK verdict is never shown as passing (CC-01).
+
+Frozen values appear as read-only context, never as form fields. RTO is not a field at all —
+D7 derives it from the condition's RTT. Runs the dashboard starts land in `logs/ui/`, via the
+project's own `sender.py` / `receiver.py` command lines, which the control panel displays.
+
+Two limits worth knowing before changing anything there: the live view trails a transfer by
+up to `FLUSH_EVERY = 64` rows and **the flush policy is not to be loosened to make it
+smoother** — that would trade measurement fidelity for animation; and `captures/` holds a
+curated per-*scenario* evidence set, not one capture per transfer, so nothing may imply an
+arbitrary run has one. The Wireshark panel points at Wireshark and states plainly that the
+dashboard does not inspect packets.

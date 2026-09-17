@@ -226,7 +226,7 @@ Every artefact above regenerates from recorded data without re-running a transfe
 the matrix itself:
 
 ```bash
-python -m pytest -q                              # 601 tests
+python -m pytest -q                              # 667 tests
 python experiments/run_experiment.py --all --resume   # the 195-run matrix (~2.5 h)
 python experiments/run_experiment.py --verify         # integrity + raw-log fingerprints
 python experiments/analyze_results.py --check-logs    # aggregate, graphs, re-derivation
