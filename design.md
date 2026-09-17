@@ -75,7 +75,9 @@ only ever swaps which implementation is active.
 | `protocol/hybrid.py` | Network-condition monitoring and mode selection |
 | `network/simulator.py` | Optional controlled loss/delay/jitter |
 | `experiments/run_experiment.py` | Automated experiment execution |
-| `experiments/analyze_results.py` | Result aggregation and metrics |
+| `experiments/analyze_results.py` | Result aggregation, metrics, graphs |
+| `experiments/capture_evidence.py` | The scripted Wireshark evidence set (§22.1) |
+| `tools/hybrid_arq.lua` | Optional Wireshark dissector for the frozen header |
 | Wireshark | Packet capture and visual verification |
 
 ### 2.1 Directory structure
@@ -101,7 +103,11 @@ Hybrid-ARQ/
 ├── experiments/
 │   ├── run_experiment.py
 │   ├── analyze_results.py
-│   └── configs/
+│   ├── capture_evidence.py
+│   ├── configs/
+│   └── results/
+├── tools/
+│   └── hybrid_arq.lua
 ├── logs/
 ├── captures/
 ├── plots/
@@ -627,11 +633,23 @@ Two things the implementation settled that this section originally left open:
   whose hashes did not match is never recorded as `ok`, whatever the sender's exit code
   said (CC-01).
 
-`experiments/analyze_results.py` loads all `events.csv`/`summary.json` with pandas,
-aggregates per condition (mean plus spread across trials, not a single run), and emits the
-graphs of specs.md §27 into `plots/`. Runs whose integrity check failed are reported
-separately and never averaged into goodput, since a corrupted transfer has no meaningful
-throughput.
+`experiments/analyze_results.py` aggregates per condition (mean plus spread across trials,
+not a single run) and emits the graphs of specs.md §27 into `plots/`. Runs whose integrity
+check failed are reported separately and never averaged into goodput, since a corrupted
+transfer has no meaningful throughput.
+
+It reads the run index rather than re-deriving 195 runs on every invocation — but the index
+*is* the logs, one step removed, since `run_experiment.py` built each row by calling
+`metrics.py` on that run's `events.csv`. `--check-logs` re-derives everything and compares,
+so the shortcut cannot quietly stop being equivalent. The mode timeline is the exception that
+must come from the logs directly: "mode selection over time" is a sequence, and an aggregate
+row cannot hold one.
+
+`experiments/capture_evidence.py` records the specs.md §22.1 evidence set the same way the
+matrix was run — real transfers through the endpoints' CLIs, with `tshark` on the loopback
+adapter — so a capture can be retaken and compared rather than taken on trust. Each scenario
+carries a fixed seed; the lossy GBN and lossy SR scenarios deliberately share one, so the two
+files show a single drop stream handled two ways.
 
 ## 11. Wireshark strategy
 
@@ -642,8 +660,15 @@ throughput.
 - Evidence to capture deliberately: clean GBN, lossy GBN (range retransmission), lossy SR
   (individual retransmission), and at least one GBN→SR transition — the MODE exchange makes
   the transition visible as packets, not just as a log line (WS-08).
-- An optional Lua dissector for named fields is a presentation nicety only; it is not on the
-  critical path (specs.md §22).
+- `tools/hybrid_arq.lua` is that optional Lua dissector (T9.5). specs.md §22 rightly calls it
+  a presentation nicety — the header is a fixed 21-byte prefix and reads without one — but it
+  turned out to earn more than that: `capture_evidence.py` counts each capture's contents
+  *through* it, so what a committed `.pcapng` holds is a query anyone can re-run rather than
+  a claim about what someone saw on screen.
+- Captures of the two long transition runs are taken with a snaplen: every header byte is
+  kept and only the payloads are truncated. A transition needs ~110 acknowledged segments of
+  evidence before the controller will act, and the payload of a DATA packet is the file,
+  which the hash already verifies.
 
 ## 12. Open decisions
 

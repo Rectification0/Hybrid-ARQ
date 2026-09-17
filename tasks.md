@@ -28,10 +28,10 @@ Per the source document §37, carried forward as the current baseline:
 | Loss simulation | ✅ Completed |
 | Hybrid controller | ✅ Completed |
 | Experiment automation | ✅ Completed |
-| Analysis / graphs | ⏭️ **Next** |
-| Final demonstration | ⬜ Not started |
+| Analysis / graphs | ✅ Completed |
+| Final demonstration | ⏭️ **Next** |
 
-Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ✅ · **M8** ✅ · Phase 7 ✅ · **M9** ✅ · **M10–M11** pending.
+Milestone map: **M1** ✅ · **M2** ✅ · **M3** ✅ · **M4** ✅ · **M5** ✅ · **M6** ✅ · **M7** ✅ · **M8** ✅ · Phase 7 ✅ · **M9** ✅ · **M10** ✅ · **M11** pending.
 
 ---
 
@@ -328,26 +328,48 @@ decisions are now frozen.*
 The data is already recorded: `experiments/results/experiment_runs.csv` (195 runs) and the raw
 logs under `logs/experiments/`. Phase 9 reads them and never re-runs them (RP-07).
 
-- [ ] **T9.1** Implement `experiments/analyze_results.py`: load all runs with pandas,
+- [x] **T9.1** Implement `experiments/analyze_results.py`: load all runs with pandas,
       aggregate per condition with across-trial spread, exclude integrity failures from
       goodput and report them separately.
-      **Satisfies:** FR-14, §20
-- [ ] **T9.2** Generate the required graphs into `plots/`: goodput vs loss; retransmission
+      **Satisfies:** FR-14, §20 · *39 cells in `aggregate.csv`, mean and sd across the five
+      trials. `--check-logs` re-derives all 195 runs from `events.csv` and confirms they
+      match the index exactly, so the aggregation still rests on the logs (CC-06).*
+- [x] **T9.2** Generate the required graphs into `plots/`: goodput vs loss; retransmission
       count vs loss; retransmission overhead vs loss; completion time vs loss; mode selection
       over time under dynamic loss.
       **Satisfies:** §27 · **Done when:** every plot is produced from recorded data by script,
       with no manual editing.
-- [ ] **T9.3** Optional graphs if time allows: goodput vs RTT; switching frequency vs loss;
+- [x] **T9.3** Optional graphs if time allows: goodput vs RTT; switching frequency vs loss;
       GBN/SR residence time vs loss.
-      **Satisfies:** §27
-- [ ] **T9.4** Capture the Wireshark evidence set into `captures/`: clean GBN; lossy GBN
+      **Satisfies:** §27 · *All three drawn; `switching_frequency_vs_loss.png` is where the
+      1–2% oscillation is visible as a shape rather than a footnote.*
+- [x] **T9.4** Capture the Wireshark evidence set into `captures/`: clean GBN; lossy GBN
       range retransmission; lossy SR individual retransmission; a GBN→SR transition; an
       SR→GBN transition if the experiment produces one.
-      **Satisfies:** G-07, WS-01 … WS-09, §22.1
-- [ ] **T9.5** Optional: Lua dissector exposing named header fields. Presentation nicety only.
-      **Satisfies:** §22 (optional)
+      **Satisfies:** G-07, WS-01 … WS-09, §22.1 · *Five captures, scripted by
+      `experiments/capture_evidence.py` so each can be retaken and compared rather than
+      taken on trust. `captures/README.md` records what each one holds, counted from the
+      capture itself.*
+- [x] **T9.5** Optional: Lua dissector exposing named header fields. Presentation nicety only.
+      **Satisfies:** §22 (optional) · *`tools/hybrid_arq.lua`. It earned its place beyond
+      presentation: the capture summaries are counted through it, so the evidence is
+      queried rather than eyeballed.*
 
 **M10 complete when:** graphs and Wireshark captures together demonstrate the protocol behavior.
+*Done — eight figures in `plots/` (`experiments/results/figures.md` indexes them) and five
+captures in `captures/`, all regenerable by script from data that was never re-run. Three
+things the figures say that the tables did not:*
+
+1. *In `retransmissions_vs_loss.png` **GBN and fixed-hybrid are one line**. The control lying
+   exactly on the baseline is the strongest available statement that the hybrid's advantage
+   comes from changing mode and from nothing else the controller does.*
+2. *In `switching_frequency_vs_loss.png` the switch count **peaks at 1–2% loss**, where the
+   hybrid's benefit is lowest, with a spread (±1.4, ±2.3) as large as the effect. The
+   oscillation of T8.4 has a shape.*
+3. *The two lossy captures, taken from one seeded drop stream, show the GBN/SR difference on
+   the wire: **GBN puts 62 redundant copies on it and SR puts none**. A resent segment that
+   was dropped never reaches the wire, so every duplicate sequence in a capture is a segment
+   that arrived and was sent again anyway — which is Go-Back-N's cost, made literal.*
 
 ## Phase 10 — Finalization (M11)
 
