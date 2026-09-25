@@ -1,6 +1,7 @@
-import argparse, socket, time, sys, os
+import argparse, socket, time, io, sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.stdout.reconfigure(line_buffering=True)  # one write per line, so the two processes never splice mid-line
+if isinstance(sys.stdout, io.TextIOWrapper):  # always true at runtime; narrows TextIO for the type checker
+    sys.stdout.reconfigure(line_buffering=True)  # one write per line, so the two processes never splice mid-line
 from common.packet import make_data, parse, ACK
 from common.channel import Channel, add_loss_args
 
@@ -18,7 +19,7 @@ chan = Channel(sock, (HOST, PORT), "SR SENDER", args.drop, args.loss, args.seed)
 
 base = next_seq = 0
 acked = [False] * TOTAL
-sent_at = [None] * TOTAL
+sent_at: list[float | None] = [None] * TOTAL
 print(f"[SR SENDER] Sending {TOTAL} packets, window={WINDOW}")
 
 while base < TOTAL:
@@ -45,7 +46,8 @@ while base < TOTAL:
 
     now = time.perf_counter()
     for seq in range(base, next_seq):
-        if not acked[seq] and sent_at[seq] is not None and now - sent_at[seq] >= TIMEOUT:
+        t = sent_at[seq]
+        if not acked[seq] and t is not None and now - t >= TIMEOUT:
             print(f"[SR SENDER] TIMEOUT DATA {seq}")
             chan.send(seq, packets[seq], retx=True)
             sent_at[seq] = time.perf_counter()

@@ -1,6 +1,7 @@
-import socket, sys, os
+import socket, io, sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.stdout.reconfigure(line_buffering=True)  # one write per line, so the two processes never splice mid-line
+if isinstance(sys.stdout, io.TextIOWrapper):  # always true at runtime; narrows TextIO for the type checker
+    sys.stdout.reconfigure(line_buffering=True)  # one write per line, so the two processes never splice mid-line
 from common.packet import DATA, ChecksumError, make_ack, parse
 
 HOST, PORT = "127.0.0.1", 5000
