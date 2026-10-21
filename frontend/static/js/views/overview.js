@@ -125,14 +125,14 @@ function integrityCard(detail) {
       ? el('p', { class: 'note-inline' }, `FIN_ACK verdict: ${integrity.verdict_reasons.join(', ')}`)
       : null,
     match === null
-      ? el('p', { class: 'card-caveat' },
+      ? el('p', { class: 'card-caveat', html:
         'No verdict was recorded. That is <strong>not</strong> read as success — a run with no '
-        + 'FIN_ACK simply never got one (CC-01).')
+        + 'FIN_ACK simply never got one (CC-01).' })
       : null,
     match === false
-      ? el('p', { class: 'card-caveat', style: 'border-color:var(--bad)' },
+      ? el('p', { class: 'card-caveat', style: 'border-color:var(--bad)', html:
         '<strong>The hashes do not match.</strong> This is a reported failure, not a warning: '
-        + 'the transfer did not deliver the file it claimed to.')
+        + 'the transfer did not deliver the file it claimed to.' })
       : null,
     !integrity.received_sha256 && match !== null
       ? el('p', { class: 'note-inline' },
@@ -166,10 +166,10 @@ function endpointCard(detail) {
         ]) : emptyState('No receiver log',
           'A receiver that never heard from anyone still writes one, so this means the '
           + 'process never started or its logs are elsewhere.'))),
-    el('p', { class: 'note-inline' },
+    el('p', { class: 'note-inline', html:
       'Each log’s timestamps are seconds from <em>that endpoint’s</em> start, so they are '
       + 'interleaved by aligning on the shared <code>START</code> row and never subtracted from '
-      + 'one another (specs.md §21).'));
+      + 'one another (specs.md §21).' }));
 }
 
 /* ----------------------------------------------------------------- render */

@@ -161,7 +161,7 @@ export async function render({ store }) {
   controls = toolbar(() => refresh(store));
   body = el('div');
   root.append(card('Events', {
-    note: '<code>SEND</code> and <code>RETX</code> are distinct events, deliberately',
+    note: 'SEND and RETX are distinct events, deliberately',
   }, controls, body));
   await refresh(store);
 

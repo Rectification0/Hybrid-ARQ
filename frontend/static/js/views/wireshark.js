@@ -102,9 +102,9 @@ function timestampCard(companion) {
         { label: 'Mode', render: (row) => (row.mode ? modeChip(row.mode) : MISSING) },
       ], retx)
       : el('p', { class: 'note-inline' }, 'This run retransmitted nothing, so there is no retransmission to find on the wire.'),
-    el('p', { class: 'card-caveat' },
+    el('p', { class: 'card-caveat', html:
       'These are seconds on the <em>sender’s</em> clock, from when its log opened — not '
-      + 'Wireshark’s capture clock. Line the two up on the START packet, which both record.'));
+      + 'Wireshark’s capture clock. Line the two up on the START packet, which both record.' }));
 }
 
 function capturesCard(companion) {
@@ -152,10 +152,10 @@ async function renderBody(store) {
   },
   el('ul', { class: 'note-inline' },
     ...guidanceFor(companion.current_mode).map((item) => el('li', { html: item }))),
-  el('p', { class: 'note-inline' },
+  el('p', { class: 'note-inline', html:
     'The <code>MODE</code> handshake is packet type 7; DATA is type 1. The full type numbering '
     + 'is part of the frozen wire format (D1), so a capture taken today is readable against one '
-    + 'taken at the start of the project.')));
+    + 'taken at the start of the project.' })));
 
   fragment.append(el('div', { class: 'grid cols-2' },
     capturesCard(companion), provenanceCard(companion.provenance)));

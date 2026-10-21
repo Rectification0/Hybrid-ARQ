@@ -126,10 +126,10 @@ function agreementCard(detail) {
         ? a === b : Math.abs(a - b) <= Math.max(1e-6, Math.abs(b) * 0.02);
       return { label, derived: format(derived[key]), own: format(own[key]), agrees };
     })),
-    el('p', { class: 'note-inline' },
+    el('p', { class: 'note-inline', html:
       'The left column is what <code>metrics.py</code> reads out of the event log; the right is '
       + 'what the endpoint counted as it ran. Comparison is to within 2%, because the two stop '
-      + 'their clocks a fraction of a second apart.'));
+      + 'their clocks a fraction of a second apart.' }));
 }
 
 async function renderBody(store) {
@@ -167,10 +167,10 @@ async function renderBody(store) {
   el('div', { style: 'margin-top:16px' },
     el('h4', {}, 'Mode residence'), residenceBar(derived)),
   derived.integrity_success === false
-    ? el('p', { class: 'card-caveat', style: 'border-color:var(--bad)' },
+    ? el('p', { class: 'card-caveat', style: 'border-color:var(--bad)', html:
       '<strong>Integrity failed for this run.</strong> Goodput is reported as unavailable rather '
       + 'than computed: a transfer that did not deliver the file has no meaningful throughput, '
-      + 'and averaging one in later would flatter the result.')
+      + 'and averaging one in later would flatter the result.' })
     : null));
 
   fragment.append(el('div', { class: 'grid cols-2' },

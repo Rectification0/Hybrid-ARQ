@@ -69,10 +69,10 @@ function chartCard(view) {
     ['DROP (cross)', 'var(--bad)'],
     ['GBN band', 'var(--gbn)'], ['SR band', 'var(--sr)'],
   ]),
-  el('p', { class: 'note-inline' },
+  el('p', { class: 'note-inline', html:
     'The shaded bands are the mode that was live, from the log’s own <code>mode</code> column. '
     + 'Marker shape carries identity as well as colour, so the three kinds stay apart in a '
-    + 'greyscale print or on a projector that flattens hue.'));
+    + 'greyscale print or on a projector that flattens hue.' }));
 }
 
 function readingCard(view) {
@@ -107,11 +107,11 @@ function readingCard(view) {
         + 'the bursts inside the ', modeChip('gbn'), ' band with those inside the ',
         modeChip('sr'), ' band.')
       : null,
-    el('p', { class: 'note-inline' },
+    el('p', { class: 'note-inline', html:
       'A burst here is a count of rows the sender logged. It is not the same number as '
       + 'duplicates on the wire: a segment that was dropped never arrived, so resending it puts '
       + 'no duplicate sequence in a capture. The gap between the two is the point of the '
-      + 'comparison in <code>captures/README.md</code>.'));
+      + 'comparison in <code>captures/README.md</code>.' }));
 }
 
 function burstTable(view) {

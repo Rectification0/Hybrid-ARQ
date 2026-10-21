@@ -153,9 +153,9 @@ async function renderBody(store) {
     ['transition (mode changed)', 'var(--text)'],
     ['no-op handshake (fixed-hybrid control)', 'var(--fixed-hybrid)'],
   ]),
-  el('p', { class: 'note-inline' },
+  el('p', { class: 'note-inline', html:
     'Bands come from the <code>mode</code> column of every row, so an abandoned handshake — '
-    + 'which leaves the mode unchanged — shows as a mark with no change in the band beneath it.')));
+    + 'which leaves the mode unchanged — shows as a mark with no change in the band beneath it.' })));
 
   fragment.append(card('The estimator and the thresholds it was read against', {
     note: 'D8 and D9, as recorded',

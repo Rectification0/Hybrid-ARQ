@@ -263,10 +263,10 @@ export async function render({ store }) {
                 hybrid: 'The system under evaluation.',
                 'fixed-hybrid': 'The switching-overhead control.',
               }[mode])))),
-        el('p', { class: 'note-inline' },
+        el('p', { class: 'note-inline', html:
           'Stop-and-wait (<code>--mode saw</code>) exists because Phase 2 needed to move data '
           + 'before either real mode was written. It is not a system under evaluation and is '
-          + 'not offered here.')))));
+          + 'not offered here.' })))));
 
   return root;
 }

@@ -278,10 +278,10 @@ export async function render({ store }) {
         { label: 'Goodput', numeric: true,
           render: (c) => num(value(c.systems.hybrid, 'goodput_kib_per_s_mean'), 2, 'KiB/s') },
       ], dynamicConditions),
-      el('p', { class: 'note-inline' },
+      el('p', { class: 'note-inline', html:
         'The mode-selection timeline for these conditions is the figure '
         + '<code>mode_selection_over_time.png</code> below — one band per trial, with the '
-        + 'scheduled loss changes marked.')));
+        + 'scheduled loss changes marked.' })));
   }
 
   root.append(card('The recorded figures', {
