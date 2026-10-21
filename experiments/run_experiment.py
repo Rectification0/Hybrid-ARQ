@@ -294,10 +294,19 @@ def source_file(directory: Path, size_bytes: int) -> Path:
     path = directory / f"source_{size_bytes}.bin"
     if path.exists() and path.stat().st_size == size_bytes:
         return path
-    blob = hashlib.sha256(b"hybrid-arq experiment source").digest()
-    while len(blob) < size_bytes:
-        blob += hashlib.sha256(blob).digest()
-    path.write_bytes(blob[:size_bytes])
+    # Each block is sha256 of everything before it. A running hasher yields that
+    # digest without rehashing the prefix, so generation is linear; hashing the
+    # whole blob per block was quadratic (~14 min at 8 MiB, holding the
+    # dashboard's runner lock throughout). The bytes are unchanged.
+    first = hashlib.sha256(b"hybrid-arq experiment source").digest()
+    running = hashlib.sha256(first)
+    blocks, length = [first], len(first)
+    while length < size_bytes:
+        block = running.copy().digest()
+        running.update(block)
+        blocks.append(block)
+        length += len(block)
+    path.write_bytes(b"".join(blocks)[:size_bytes])
     return path
 
 
