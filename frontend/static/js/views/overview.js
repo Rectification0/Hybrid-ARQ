@@ -209,16 +209,23 @@ export async function render({ store }) {
 }
 
 let refreshing = false;
+let wasActive = false;
 
 export async function onTick({ store }) {
   if (!body || refreshing) return;
   refreshing = true;
   try {
-    // Re-read only while something can still change, or when the selection moved.
-    if (store.transfer.active || store.selectedKey !== cachedKey) {
+    // Re-read only while something can still change, when the selection moved,
+    // or once more as a run finishes — its summary.json is written at the end,
+    // so the last read taken while it was active is not the final one.
+    const finished = wasActive && !store.transfer.active;
+    wasActive = store.transfer.active;
+    if (store.transfer.active || finished || store.selectedKey !== cachedKey) {
       clear(body).append(await renderBody(store));
     } else {
-      const live = body.firstElementChild;
+      // renderBody's grid holds the live card first; replacing the grid itself
+      // would discard the recorded cards beside it.
+      const live = body.firstElementChild && body.firstElementChild.firstElementChild;
       if (live) live.replaceWith(liveCard(store));
     }
   } finally {

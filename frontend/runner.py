@@ -437,8 +437,12 @@ class TransferRunner:
 
         payload = active.as_dict()
         payload["progress"] = self._progress(active)
+        # ``progress`` is also top level, matching the idle shape above: every
+        # view destructures it from there, and without it a live run read as
+        # permanently STARTING with no rows flushed.
         return {"active": active.state in (STATE_STARTING, STATE_RUNNING),
                 "state": active.state, "run": payload,
+                "progress": payload["progress"],
                 "live_lag_note": data.LIVE_LAG_NOTE}
 
     def _progress(self, active: ActiveRun) -> dict[str, Any]:
